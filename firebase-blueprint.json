@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user identity and global roles",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "editor", "contributor", "viewer"] },
+        "shareToken": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "LifeEvent": {
+      "title": "Life Event",
+      "description": "A significant achievement or milestone on the timeline",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "shareToken": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "primaryPhoto": { "type": "string" },
+        "additionalPhotos": { "type": "array", "items": { "type": "string" } },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["published", "archived"] },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["ownerId", "title", "date", "primaryPhoto"]
+    },
+    "Contribution": {
+      "title": "Contribution",
+      "description": "Photos and stories added by participants to an event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "eventId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "text": { "type": "string" },
+        "photos": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["pending", "published", "declined"] },
+        "createdAt": { "type": "number" },
+        "approvedAt": { "type": "number" },
+        "approvedBy": { "type": "string" }
+      },
+      "required": ["eventId", "authorId", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and permissions"
+    },
+    "events/{eventId}": {
+      "schema": "LifeEvent",
+      "description": "Timeline events created by the owner"
+    },
+    "events/{eventId}/contributions/{contributionId}": {
+      "schema": "Contribution",
+      "description": "Contributions for a specific event"
+    }
+  }
+}

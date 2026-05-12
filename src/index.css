@@ -1,0 +1,42 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", sans-serif;
+  
+  --color-prism-50: #f8fafc;
+  --color-prism-100: #f1f5f9;
+  --color-prism-200: #e2e8f0;
+  --color-prism-300: #cbd5e1;
+  --color-prism-400: #94a3b8;
+  --color-prism-500: #64748b;
+  --color-prism-600: #475569;
+  --color-prism-700: #334155;
+  --color-prism-800: #1e293b;
+  --color-prism-900: #0f172a;
+  
+  --color-accent-blue: #3b82f6;
+  --color-accent-purple: #8b5cf6;
+  --color-accent-pink: #ec4899;
+}
+
+@layer base {
+  body {
+    @apply bg-prism-50 text-prism-900 font-sans antialiased selection:bg-accent-blue/30;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/70 backdrop-blur-md border border-white/20 shadow-lg;
+  }
+  
+  .prism-gradient {
+    @apply bg-gradient-to-br from-accent-blue via-accent-purple to-accent-pink;
+  }
+  
+  .text-prism {
+    @apply bg-gradient-to-r from-accent-blue via-accent-purple to-accent-pink bg-clip-text text-transparent font-display;
+  }
+}

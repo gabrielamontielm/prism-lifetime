@@ -1,0 +1,75 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- HELPERS ---
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isRootAdmin() { return isSignedIn() && request.auth.token.email.lower() == 'gabriela.montiel.m@gmail.com'; }
+    
+    function isEditor() {
+      return isRootAdmin() || (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['owner', 'editor']);
+    }
+
+    function isValidEvent(data) {
+      return data.title is string && data.title.size() <= 200 &&
+             data.description is string && data.description.size() <= 5000 &&
+             data.date is string &&
+             data.primaryPhoto is string &&
+             data.tags is list && data.tags.size() <= 20 &&
+             data.participants is list && data.participants.size() <= 50;
+    }
+
+    // --- RULES ---
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() || (resource != null && resource.data.shareToken != null);
+      allow list: if isEditor() || (resource.data.shareToken != null);
+      allow create: if isOwner(userId) && 
+                    incoming().keys().hasAll(['uid', 'email', 'role', 'createdAt', 'updatedAt']) &&
+                    (incoming().role == 'viewer' || (incoming().role == 'owner' && isRootAdmin()));
+      allow update: if isOwner(userId) && 
+                    incoming().role == existing().role;
+    }
+
+    match /events/{eventId} {
+      // Allow read if authorized OR if a valid shareToken is present
+      allow read: if (isSignedIn() && (
+        resource.data.ownerId == request.auth.uid || 
+        request.auth.uid in resource.data.participants || 
+        isEditor()
+      )) || (resource.data.shareToken != null);
+      
+      allow create: if isSignedIn() && isValidEvent(incoming()) && incoming().ownerId == request.auth.uid;
+      allow update: if (isEditor() || isOwner(existing().ownerId)) && (
+        (isValidEvent(incoming()) && incoming().ownerId == existing().ownerId) ||
+        (incoming().diff(existing()).affectedKeys().hasOnly(['shareToken']))
+      );
+      allow delete: if (isEditor() || isOwner(existing().ownerId));
+
+      match /contributions/{contribId} {
+        // Contributions inherit the visibility logic of the parent event
+        allow read: if isSignedIn() && (
+          get(/databases/$(database)/documents/events/$(eventId)).data.ownerId == request.auth.uid ||
+          request.auth.uid in get(/databases/$(database)/documents/events/$(eventId)).data.participants ||
+          isEditor()
+        );
+        allow create: if isSignedIn();
+        allow update, delete: if isEditor() || isOwner(existing().authorId);
+      }
+    }
+
+    // MUST match the subcollections for collection group queries
+    match /{path=**}/contributions/{contribId} {
+      allow list: if resource.data.status == 'published' || isEditor() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+  }
+}
