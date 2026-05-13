@@ -12,6 +12,20 @@ Designed with a "Prism" aesthetic—technical, clean, and high-contrast—pairin
 - **Performance**: High-speed image optimization and rendering.
 - **Security**: Robust, hardened access control.
 
+### App Previews
+
+![Dashboard View](docs/assets/dashboard.png)
+
+*Dashboard Timeline*
+
+![Compact View](docs/assets/compact_view.png)
+
+*Compact View*
+
+![Bento Grid](docs/assets/bento_view.png)
+
+*Bento Grid Visualization*
+
 ---
 
 ## System Requirements & Prerequisites
