@@ -11,27 +11,28 @@ import { motion, AnimatePresence } from 'motion/react';
 interface TimelineProps {
   events: LifeEvent[];
   onEventClick?: (event: LifeEvent) => void;
+  compact?: boolean;
 }
 
-export function Timeline({ events, onEventClick }: TimelineProps) {
+export function Timeline({ events, onEventClick, compact = false }: TimelineProps) {
   const sortedEvents = [...events].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
     <div className="relative py-12 px-4">
       <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-gradient-to-b from-accent-blue via-accent-purple to-accent-pink opacity-20 hidden md:block" />
 
-      <div className="max-w-7xl mx-auto space-y-12 md:space-y-24">
+      <div className={`max-w-7xl mx-auto ${compact ? 'space-y-6' : 'space-y-12 md:space-y-24'}`}>
         <AnimatePresence>
           {sortedEvents.map((event, index) => {
             const isEven = index % 2 === 0;
             return (
               <div key={event.id} className="relative">
-                <div className="absolute left-1/2 -ml-2 w-4 h-4 rounded-full prism-gradient hidden md:block z-10 shadow-lg shadow-accent-purple/30 mt-24" />
+                <div className={`absolute left-1/2 -ml-2 w-4 h-4 rounded-full prism-gradient hidden md:block z-10 shadow-lg shadow-accent-purple/30 ${compact ? 'mt-8' : 'mt-24'}`} />
                 
                 <div className={`flex flex-col md:flex-row items-center gap-8 ${isEven ? 'md:flex-row-reverse' : ''}`}>
                   <div className="w-full md:w-1/2 px-4 md:px-12 flex justify-center">
-                    <div className="w-full max-w-md">
-                      <EventCard event={event} onClick={onEventClick} />
+                    <div className={`w-full ${compact ? 'max-w-full' : 'max-w-md'}`}>
+                      <EventCard event={event} onClick={onEventClick} compact={compact} />
                     </div>
                   </div>
                   <div className="w-full md:w-1/2 hidden md:block" />

@@ -6,7 +6,7 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 // Ensure we have a clean object for initialization
 const firebaseConfigClean = {
-  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || (firebaseConfig as any).apiKey,
   authDomain: firebaseConfig.authDomain,
   projectId: firebaseConfig.projectId,
   storageBucket: firebaseConfig.storageBucket,

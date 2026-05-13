@@ -9,6 +9,13 @@ import { db } from '../services/firebase';
 import { LifeEvent, UserProfile } from '../types';
 import { useAuth } from './useAuth';
 
+/**
+ * Custom hook to fetch and synchronize life events from Firestore.
+ * Supports private timelines, shared public timelines via tokens, and admin (isEditor) views.
+ * 
+ * @param {string | null} shareToken - Optional token for viewing a publicly shared timeline.
+ * @returns {Object} { events, sharedOwner, loading, error }
+ */
 export function useTimeline(shareToken?: string | null) {
   const { user, isEditor } = useAuth();
   const [events, setEvents] = useState<LifeEvent[]>([]);

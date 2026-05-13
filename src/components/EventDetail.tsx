@@ -104,10 +104,10 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
         className="w-full max-w-2xl h-full glass rounded-3xl overflow-hidden flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header Image */}
+        {/* Header Header */}
         <div className="relative h-64 sm:h-80 w-full shrink-0">
           <img 
-            src={event.primaryPhoto} 
+            src={event.primaryPhoto || "https://images.unsplash.com/photo-1527529482837-4698179dc6ce?auto=format&fit=crop&q=80&w=1200"} 
             alt={event.title} 
             className="w-full h-full object-cover"
             referrerPolicy="no-referrer"
@@ -221,7 +221,7 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
             </section>
           )}
 
-          {(event.additionalPhotos && event.additionalPhotos.length > 0) && (
+          {event.additionalPhotos && event.additionalPhotos.length > 0 && (
             <section>
               <h3 className="text-sm font-bold text-prism-400 uppercase tracking-widest mb-4">Gallery</h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -277,13 +277,6 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
                       <span className="font-bold text-sm text-prism-900">{contribution.authorName}</span>
                     </div>
                     <p className="text-prism-600 text-sm leading-relaxed italic">"{contribution.text}"</p>
-                    {contribution.photos.length > 0 && (
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        {contribution.photos.map((photo, i) => (
-                          <img key={i} src={photo} alt="Contribution" className="w-full h-32 object-cover rounded-lg" />
-                        ))}
-                      </div>
-                    )}
                   </div>
                 ))}
               </div>

@@ -5,9 +5,8 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Layers, LogIn, LogOut, PlusCircle, Settings, Sparkles, Share2 } from 'lucide-react';
+import { Layers, LogIn, LogOut, PlusCircle, Sparkles, Share2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { IntegrationsDialog } from './IntegrationsDialog';
 import { ShareButton } from './ShareButton';
 
 interface NavbarProps {
@@ -16,7 +15,6 @@ interface NavbarProps {
 
 export function Navbar({ onNewEntry }: NavbarProps) {
   const { user, profile, signIn, logout, isEditor } = useAuth();
-  const [showIntegrations, setShowIntegrations] = useState(false);
 
   return (
     <nav className="glass sticky top-0 z-50 w-full px-6 py-4">
@@ -56,13 +54,6 @@ export function Navbar({ onNewEntry }: NavbarProps) {
                   </div>
                 )}
                 <button 
-                  onClick={() => setShowIntegrations(true)}
-                  className="p-2 text-prism-400 hover:text-accent-blue transition-colors"
-                  title="Integrations"
-                >
-                  <Settings size={20} />
-                </button>
-                <button 
                   onClick={logout}
                   className="p-2 text-prism-400 hover:text-accent-pink transition-colors"
                   title="Logout"
@@ -82,12 +73,6 @@ export function Navbar({ onNewEntry }: NavbarProps) {
           )}
         </div>
       </div>
-
-      <AnimatePresence>
-        {showIntegrations && (
-          <IntegrationsDialog onClose={() => setShowIntegrations(false)} />
-        )}
-      </AnimatePresence>
     </nav>
   );
 }

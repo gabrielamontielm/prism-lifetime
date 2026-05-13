@@ -6,6 +6,9 @@ import { EventDetail } from './components/EventDetail';
 import { CreateEventDialog } from './components/CreateEventDialog';
 import { EditorDashboard } from './components/EditorDashboard';
 import { FilterBar } from './components/FilterBar';
+import { MapView } from './components/MapView';
+import { StorySlideshow } from './components/StorySlideshow';
+import { BentoView } from './components/BentoView';
 import { useTimeline } from './hooks/useTimeline';
 import { useAuth } from './hooks/useAuth';
 import { LifeEvent } from './types';
@@ -29,6 +32,7 @@ function Dashboard() {
 
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'standard' | 'compact' | 'map' | 'story' | 'bento'>('standard');
 
   useEffect(() => {
     if (!loading && events.length > 0) {
@@ -133,6 +137,8 @@ function Dashboard() {
             selectedTag={selectedTag}
             setSelectedTag={setSelectedTag}
             allTags={allTags}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
           />
 
           {error ? (
@@ -140,10 +146,27 @@ function Dashboard() {
               <p className="text-red-500 font-medium">Failed to synchronize your timeline.</p>
               <p className="text-sm text-red-400 mt-2">Please check your permissions or try again later.</p>
             </div>
+          ) : viewMode === 'map' ? (
+            <MapView 
+              events={filteredEvents} 
+              onEventClick={(event) => setSelectedEvent(event)} 
+            />
+          ) : viewMode === 'story' ? (
+            <StorySlideshow 
+              events={filteredEvents} 
+              onClose={() => setViewMode('standard')}
+              onEventClick={(event) => setSelectedEvent(event)} 
+            />
+          ) : viewMode === 'bento' ? (
+            <BentoView 
+              events={filteredEvents} 
+              onEventClick={(event) => setSelectedEvent(event)} 
+            />
           ) : (
             <Timeline 
               events={filteredEvents} 
               onEventClick={(event) => setSelectedEvent(event)} 
+              compact={viewMode === 'compact'}
             />
           )}
         </div>

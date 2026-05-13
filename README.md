@@ -1,20 +1,60 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# LifePrism 💎
 
-# Run and deploy your AI Studio app
+**LifePrism** is a high-fidelity personal milestone and legacy tracker. It transforms the standard photo gallery into a curated, searchable, and collaborative **Lifeline**.
 
-This contains everything you need to run your app locally.
+Designed with a "Prism" aesthetic—technical, clean, and high-contrast—pairing modern UI patterns with robust geospatial and temporal data.
 
-View your app in AI Studio: https://ai.studio/apps/9ce632e7-e094-4767-961c-44b6863e2bd3
+---
 
-## Run Locally
+## ✨ Features
 
-**Prerequisites:**  Node.js
+- 🗺️ **Multi-View Engine**: Standard Timeline, Compact List, Google Maps view, Immersive Stories, and Bento Grid.
+- 📍 **Geospatial Intelligence**: Integrated Google Places API for precision milestone tagging.
+- 🤝 **Live Collaboration**: Invite friends and family to contribute to your milestones in real-time.
+- ⚡ **Performance Optimized**: Client-side image resizing and optimization for ultra-fast loading.
+- 🛡️ **Zero-Trust Security**: Hardened Firestore rules protecting your legacy data.
 
+---
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## 🚀 Quick Start
+
+### Online
+View the live app in AI Studio: [LifePrism Preview](https://ai.studio/apps/9ce632e7-e094-4767-961c-44b6863e2bd3)
+
+### Local Development
+1. **Clone & Install**:
+   ```bash
+   npm install
+   ```
+2. **Configure Environment**:
+   - Create a `.env.local` file.
+   - Set `GEMINI_API_KEY` and other required VITE_ variables from your [Google Cloud Console](https://console.cloud.google.com/).
+3. **Run**:
+   ```bash
+   npm run dev
+   ```
+
+---
+
+## 📖 Documentation
+
+- [**Quick Install Guide**](./docs/QUICK_INSTALL.md) - Deep dive into local setup.
+- [**User Guide**](./docs/USER_GUIDE.md) - How to build your Lifeline.
+- [**Technical Documentation**](./docs/TECHNICAL_DOCS.md) - Architecture, Hooks, and Security.
+- [**Product Requirements (PRD)**](./docs/PRD.md) - Core vision and scope.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Framework**: React 18 / Vite
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS 4.0
+- **Animation**: Motion (Framer)
+- **Backend**: Firebase Firestore / Auth
+- **Testing**: Vitest / React Testing Library
+
+---
+
+## ⚖️ License
+MIT © 2024 LifePrism Team

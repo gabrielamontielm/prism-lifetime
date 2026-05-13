@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Calendar, Tag as TagIcon, ArrowRight, Save, Loader2, X, Image as ImageIcon, Users, Type, Plus, Trash2 } from 'lucide-react';
+import { Camera, Calendar, Tag as TagIcon, Loader2, X, Users, Plus, Trash2, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, handleFirestoreError, OperationType } from '../services/firebase';
 import { collection, addDoc, serverTimestamp, updateDoc, doc, query, where, getDocs } from 'firebase/firestore';
@@ -10,7 +10,6 @@ import { Dialog } from './ui/Dialog';
 import { FilePicker } from './ui/FilePicker';
 import { UserSearch } from './ui/UserSearch';
 import { UserProfile, LifeEvent, EventLocation } from '../types';
-import { GooglePhotosBrowser } from './GooglePhotosBrowser';
 import { PlaceAutocomplete } from './PlaceAutocomplete';
 import { cn } from '../lib/utils';
 
@@ -26,8 +25,6 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
   const { user, profile } = useAuth();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
-  const [showGooglePhotos, setShowGooglePhotos] = useState<boolean>(false);
-  const [googlePhotosTarget, setGooglePhotosTarget] = useState<'primary' | 'additional'>('primary');
   const [currentTag, setCurrentTag] = useState('');
   
   const [formData, setFormData] = useState({
@@ -75,35 +72,12 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
     if (!user) return;
     setLoading(true);
     try {
-      // Find the category to select a better default image
-      const categoryTags = CATEGORIES.map(c => c.toLowerCase());
-      const selectedCategory = formData.tags.find(t => categoryTags.includes(t.toLowerCase()))?.toLowerCase() || "achievement";
-      
-      let photo = formData.primaryPhoto;
-      
-      if (!photo) {
-        // High-quality, reliable Unsplash IDs for each category
-        const photoIds: Record<string, string> = {
-          career: "photo-1507679799987-c73779587ccf",
-          personal: "photo-1543269865-cbf427effbad",
-          travel: "photo-1500835595351-263d813f1d19",
-          health: "photo-1506126613408-eca07ce68773",
-          education: "photo-1501504905252-473c47e087f8",
-          art: "photo-1456086272160-b28b0645b729",
-          community: "photo-1529156069898-49953e39b3ac",
-          achievement: "photo-1527529482837-4698179dc6ce"
-        };
-        const photoId = photoIds[selectedCategory] || "photo-1527529482837-4698179dc6ce";
-        // Final polished URL
-        photo = `https://images.unsplash.com/${photoId}?auto=format&fit=crop&q=80&w=1200`;
-      }
-
       const eventData = { 
         title: formData.title, 
         description: formData.description, 
         date: formData.date, 
-        primaryPhoto: photo, 
-        additionalPhotos: formData.additionalPhotos, 
+        primaryPhoto: formData.primaryPhoto,
+        additionalPhotos: formData.additionalPhotos,
         tags: formData.tags, 
         location: formData.location,
         participants: [user.uid, ...formData.participants.map(p => p.uid)], 
@@ -201,40 +175,47 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
 
             {step === 2 && (
               <motion.div key="2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
-                <div className="space-y-4">
-                  <FilePicker 
-                    label="Primary Cover Photo" 
-                    path="events" 
-                    previewUrl={formData.primaryPhoto} 
-                    onUploadComplete={u => setFormData(p => ({ ...p, primaryPhoto: u }))} 
-                    onClear={() => setFormData(p => ({ ...p, primaryPhoto: '' }))}
-                  />
+                <div className="space-y-6">
+                  <div className="p-4 bg-prism-50 rounded-2xl border border-prism-100">
+                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-accent-blue mb-4 block">Primary Cover</label>
+                    <FilePicker 
+                      path="events" 
+                      previewUrl={formData.primaryPhoto} 
+                      onUploadComplete={u => setFormData(p => ({ ...p, primaryPhoto: u }))} 
+                      onClear={() => setFormData(p => ({ ...p, primaryPhoto: '' }))}
+                    />
+                  </div>
                   
-                  <div className="space-y-3">
-                    <label className="text-sm font-bold text-prism-700 block">Milestone Moments (Gallery)</label>
-                    <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-prism-400">Memory Gallery</label>
+                      <span className="text-[10px] font-bold text-prism-300">{formData.additionalPhotos.length} / 9 photos</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
                       {formData.additionalPhotos.map((photo, idx) => (
-                        <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden border border-prism-100 shadow-sm">
+                        <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden border border-prism-100 shadow-sm bg-white">
                           <img src={photo} alt="" className="w-full h-full object-cover" />
-                          <button 
-                            onClick={() => setFormData(p => ({ ...p, additionalPhotos: p.additionalPhotos.filter((_, i) => i !== idx) }))}
-                            className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <Trash2 size={12} />
-                          </button>
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <button 
+                              onClick={() => setFormData(p => ({ ...p, additionalPhotos: p.additionalPhotos.filter((_, i) => i !== idx) }))}
+                              className="p-1.5 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
                         </div>
                       ))}
-                      <FilePicker 
-                        compact 
-                        resetAfterUpload
-                        path="events" 
-                        label="Add Photo"
-                        onUploadComplete={u => setFormData(p => ({ ...p, additionalPhotos: [...p.additionalPhotos, u] }))} 
-                      />
+                      {formData.additionalPhotos.length < 9 && (
+                        <FilePicker 
+                          compact 
+                          resetAfterUpload
+                          path="events" 
+                          onUploadComplete={u => setFormData(p => ({ ...p, additionalPhotos: [...p.additionalPhotos, u] }))} 
+                        />
+                      )}
                     </div>
                   </div>
                 </div>
-                <p className="text-xs text-prism-400 text-center">Images bring your milestones to life. Add as many as you like.</p>
               </motion.div>
             )}
 
@@ -370,26 +351,6 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
         </div>
       </div>
       
-      <AnimatePresence>
-        {showGooglePhotos && (
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            className="absolute inset-0 z-[60] bg-white"
-          >
-            <GooglePhotosBrowser 
-              onClose={() => setShowGooglePhotos(false)} 
-              onSelect={u => { 
-                if (googlePhotosTarget === 'primary') 
-                  setFormData(p => ({ ...p, primaryPhoto: u })); 
-                else 
-                  setFormData(p => ({ ...p, additionalPhotos: [...p.additionalPhotos, u] })); 
-                setShowGooglePhotos(false); 
-              }} 
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
     </Dialog>
   );
 }
