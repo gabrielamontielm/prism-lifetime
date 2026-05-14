@@ -32,7 +32,7 @@ function Dashboard() {
 
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'standard' | 'compact' | 'map' | 'story' | 'bento'>('standard');
+  const [viewMode, setViewMode] = useState<'standard' | 'compact' | 'map' | 'story' | 'bento'>('compact');
 
   useEffect(() => {
     if (!loading && events.length > 0) {

@@ -276,7 +276,20 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
                       </div>
                       <span className="font-bold text-sm text-prism-900">{contribution.authorName}</span>
                     </div>
-                    <p className="text-prism-600 text-sm leading-relaxed italic">"{contribution.text}"</p>
+                    <p className="text-prism-600 text-sm leading-relaxed italic mb-4">"{contribution.text}"</p>
+                    {contribution.photos && contribution.photos.length > 0 && (
+                      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                        {contribution.photos.map((p, i) => (
+                          <img 
+                            key={i} 
+                            src={p} 
+                            alt="" 
+                            className="w-20 h-20 rounded-xl object-cover border border-prism-100 shrink-0" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
