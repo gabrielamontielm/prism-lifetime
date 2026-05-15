@@ -1,10 +1,12 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Loader2, CheckCircle2, AlertCircle, Trash2 } from 'lucide-react';
+import { Camera, Loader2, CheckCircle2, AlertCircle, Trash2, Upload, Box, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFile } from '../../services/storage';
 import { resizeImage } from '../../lib/image';
 import { Button } from './Button';
 import { cn } from '../../lib/utils';
+
+type ImageSource = 'upload' | 'camera' | 'google';
 
 interface FilePickerProps {
   onUploadComplete: (url: string) => void;
@@ -17,11 +19,13 @@ interface FilePickerProps {
 }
 
 export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl: initialPreview, compact, resetAfterUpload }: FilePickerProps) {
+  const [source, setSource] = useState<ImageSource>('upload');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<string | null>(initialPreview || null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const [currentObjectURL, setCurrentObjectURL] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -41,7 +45,7 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Safety check for obvious oversized files (allow reasonable overhead)
+    // Safety check for obvious oversized files
     if (file.size > 20 * 1024 * 1024) {
       setError('File is too large (>20MB). Please select a smaller image.');
       return;
@@ -84,7 +88,6 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       const message = err.message || 'Transmission failed';
       setError(`${message}. Please try again.`);
       
-      // Revert to original if not a fresh selection
       if (!initialPreview) {
         setPreview(null);
       } else {
@@ -92,24 +95,59 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       }
     } finally {
       setUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      // Reset inputs
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (cameraInputRef.current) cameraInputRef.current.value = '';
     }
   };
+
+  const Sources = () => (
+    <div className="flex gap-1 p-1 bg-prism-50 rounded-xl mb-3">
+      <button 
+        onClick={() => setSource('upload')}
+        className={cn(
+          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          source === 'upload' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+        )}
+      >
+        <Upload size={14} />
+        File
+      </button>
+      <button 
+        onClick={() => setSource('camera')}
+        className={cn(
+          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          source === 'camera' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+        )}
+      >
+        <Camera size={14} />
+        Camera
+      </button>
+      <button 
+        onClick={() => setSource('google')}
+        className={cn(
+          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          source === 'google' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+        )}
+      >
+        <ImageIcon size={14} />
+        Photos
+      </button>
+    </div>
+  );
 
   if (compact) {
     return (
       <div className="relative group aspect-square">
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-        />
+        <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+        <input type="file" ref={cameraInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
+        
         <button
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            if (source === 'camera') cameraInputRef.current?.click();
+            else if (source === 'upload') fileInputRef.current?.click();
+            // Google Photos toggle would go here
+          }}
           disabled={uploading}
           className="w-full h-full flex flex-col items-center justify-center gap-2 border-2 border-dashed border-prism-100 rounded-xl hover:border-accent-blue hover:bg-accent-blue/5 transition-all group overflow-hidden relative"
         >
@@ -117,8 +155,10 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
             <img src={preview} alt="Preview" className="w-full h-full object-cover" />
           ) : (
             <>
-              <Camera size={20} className="text-prism-300 group-hover:text-accent-blue transition-colors" />
-              <span className="text-[10px] font-bold text-prism-400 group-hover:text-accent-blue">ADD</span>
+              {source === 'upload' && <Upload size={20} className="text-prism-300" />}
+              {source === 'camera' && <Camera size={20} className="text-prism-300" />}
+              {source === 'google' && <ImageIcon size={20} className="text-prism-300" />}
+              <span className="text-[10px] font-bold text-prism-400 uppercase">{source}</span>
             </>
           )}
 
@@ -128,6 +168,26 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
             </div>
           )}
         </button>
+
+        {/* Source Toggle Overlays in compact mode */}
+        {!preview && !uploading && (
+          <div className="absolute -bottom-1 -right-1 flex gap-1 transform translate-y-full pt-2">
+            {['upload', 'camera', 'google'].map((s) => (
+              <button 
+                key={s}
+                onClick={() => setSource(s as ImageSource)}
+                className={cn(
+                  "p-1.5 rounded-full transition-all border",
+                  source === s ? "bg-accent-blue text-white border-transparent" : "bg-white text-prism-400 border-prism-100"
+                )}
+              >
+                {s === 'upload' && <Upload size={10} />}
+                {s === 'camera' && <Camera size={10} />}
+                {s === 'google' && <ImageIcon size={10} />}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     );
   }
@@ -136,6 +196,8 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
     <div className="space-y-3">
       {label && <label className="text-sm font-bold text-prism-700 block">{label}</label>}
       
+      <Sources />
+
       <div 
         className={cn(
           "relative min-h-[160px] border-2 border-dashed rounded-2xl transition-all overflow-hidden flex flex-col items-center justify-center p-6 bg-white",
@@ -143,13 +205,8 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
           error ? "border-red-200 bg-red-50" : ""
         )}
       >
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-        />
+        <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
+        <input type="file" ref={cameraInputRef} onChange={handleFileChange} accept="image/*" capture="environment" className="hidden" />
 
         {preview && !uploading ? (
           <div className="absolute inset-0 group">
@@ -158,7 +215,10 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
               <Button 
                 variant="secondary" 
                 size="sm" 
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  if (source === 'camera') cameraInputRef.current?.click();
+                  else fileInputRef.current?.click();
+                }}
                 className="bg-white/90 hover:bg-white"
               >
                 Change
@@ -179,20 +239,40 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
               )}
             </div>
           </div>
-        ) : !uploading && (
+        ) : !uploading && source !== 'google' ? (
           <button
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              if (source === 'camera') cameraInputRef.current?.click();
+              else fileInputRef.current?.click();
+            }}
             className="flex flex-col items-center gap-3 text-prism-400 group-hover:text-accent-blue transition-colors"
           >
             <div className="p-3 bg-prism-50 rounded-full group-hover:bg-accent-blue/10 transition-colors">
-              <Camera size={24} />
+              {source === 'camera' ? <Camera size={24} /> : <Upload size={24} />}
             </div>
             <div className="text-center">
-              <span className="text-sm font-bold block mb-1">Click to upload photo</span>
+              <span className="text-sm font-bold block mb-1">
+                {source === 'camera' ? 'Open Camera' : 'Click to upload photo'}
+              </span>
               <span className="text-xs">Supports JPG, PNG (Max 15MB)</span>
             </div>
           </button>
-        )}
+        ) : !uploading && source === 'google' ? (
+          <div className="flex flex-col items-center gap-4 text-center">
+             <div className="p-4 bg-accent-blue/5 rounded-full text-accent-blue">
+                <Box size={32} className="animate-pulse" />
+             </div>
+             <div className="space-y-1">
+                <p className="text-sm font-bold text-prism-900">Google Photos Integration</p>
+                <p className="text-xs text-prism-400 max-w-[240px]">
+                  Requires Google Cloud Platform setup. Connect your account to select directly from your library.
+                </p>
+             </div>
+             <Button variant="outline" size="sm" className="rounded-full">
+                Connect Google Account
+             </Button>
+          </div>
+        ) : null}
 
         {uploading && (
           <div className="absolute inset-0 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center p-4">

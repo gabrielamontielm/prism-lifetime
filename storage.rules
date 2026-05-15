@@ -6,24 +6,13 @@ service firebase.storage {
       allow read, write: if false;
     }
 
-    // Event photos
-    match /events/{fileName} {
+    // Event photos (including contributions)
+    match /events/{allPaths=**} {
       allow read: if request.auth != null;
       allow write: if request.auth != null 
-                   && request.resource.size < 10 * 1024 * 1024 // 10MB limit
+                   && request.resource.size < 10 * 1024 * 1024 
                    && request.resource.contentType.matches('image/.*');
-      // Only the owner should delete, but since IDs are randomized and tied to events, 
-      // we usually allow delete if authenticated for this MVP, 
-      // or tie it to the authorId metadata.
       allow delete: if request.auth != null;
-    }
-
-    // User profiles
-    match /profiles/{userId}/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth == userId
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
     }
   }
 }

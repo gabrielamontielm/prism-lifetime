@@ -32,6 +32,12 @@ Our Firestore rules are built on a "Master Gate" pattern.
    - String size limits (prevents denial-of-wallet attacks)
    - Map key strictness (no "ghost" fields allowed)
 
+## 📡 Storage & CORS
+
+Firebase Storage requires manual CORS configuration via CLI to allow uploads from the browser.
+- **Config File**: `cors.json` in root.
+- **Troubleshooting**: See `docs/STORAGE_CORS.md` for specific `gsutil` commands to resolve preflight failures.
+
 ## 🖼️ Image Handling Pipeline
 
 To prevent slow load times and bloated database costs, LifePrism performs **Client-Side Optimization**:

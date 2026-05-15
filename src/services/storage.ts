@@ -1,5 +1,5 @@
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { storage } from './firebase';
+import { storage, auth } from './firebase';
 
 /**
  * Uploads a file to Firebase Storage with progress tracking
@@ -13,10 +13,11 @@ export async function uploadFile(
   path: string,
   onProgress?: (progress: number) => void
 ): Promise<string> {
-  const filename = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-  const storageRef = ref(storage, `${path}/${filename}`);
+  const storageRef = ref(storage, `${path}/${file.name}`);
   
   const uploadTask = uploadBytesResumable(storageRef, file);
+
+  console.log(`[Storage] Starting upload to ${path}/${file.name}. User:`, auth.currentUser?.uid);
 
   return new Promise((resolve, reject) => {
     uploadTask.on(
@@ -27,7 +28,13 @@ export async function uploadFile(
       },
       (error) => {
         console.error('Storage Upload Error:', error);
-        reject(error);
+        if (error.code === 'storage/unauthorized') {
+          const customError = new Error('Storage Access Denied: Please ensure your Firebase Storage Security Rules are configured. See docs/STORAGE_CORS.md');
+          (customError as any).code = error.code;
+          reject(customError);
+        } else {
+          reject(error);
+        }
       },
       async () => {
         const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
