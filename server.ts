@@ -210,14 +210,10 @@ async function startServer() {
         console.warn('Token refresh failed (non-fatal):', tokenError);
       }
 
-      const appUrl = getAppUrl(req);
-      const callbackUri = `${appUrl}/auth/google/picker-callback`;
-
       const response = await client.request({
         url: 'https://photospicker.googleapis.com/v1/sessions',
         method: 'POST',
-        data: {
-        }
+        data: {}
       });
 
       const pickerUri = (response.data as any).pickerUri || (response.data as any).picker_uri;
@@ -258,13 +254,65 @@ async function startServer() {
         console.warn('Token refresh failed in /picker/session:', tokenError);
       }
 
-      const response = await client.request({
-        url: 'https://photospicker.googleapis.com/v1/sessions',
-        method: 'POST',
-        data: {}
-      });
+      const appUrl = getAppUrl(req);
+      const callbackUri = `${appUrl}/auth/google/callback`;
 
-      console.log(`[Picker] Session created: ${(response.data as any).id}`);
+      let response;
+      try {
+         console.log(`[Picker] Creating session with picker_config (snake_case) and callbackUri: ${callbackUri}`);
+         response = await client.request({
+           url: 'https://photospicker.googleapis.com/v1/sessions',
+           method: 'POST',
+           data: {
+             picker_config: {
+               v1_config: {
+                 max_items: 100
+               }
+             },
+             callbackUri
+           }
+         });
+      } catch (err: any) {
+         console.warn('[Picker] snake_case session creation failed, trying camelCase...', err.response?.data || err.message);
+         try {
+           response = await client.request({
+             url: 'https://photospicker.googleapis.com/v1/sessions',
+             method: 'POST',
+             data: {
+               pickerConfig: {
+                 v1Config: {
+                   maxItems: 100
+                 }
+               },
+               callbackUri
+             }
+           });
+         } catch (err2: any) {
+            console.warn('[Picker] camelCase session creation failed, trying without callbackUri...', err2.response?.data || err2.message);
+            try {
+              response = await client.request({
+                url: 'https://photospicker.googleapis.com/v1/sessions',
+                method: 'POST',
+                data: {
+                  pickerConfig: {
+                    v1Config: {
+                      maxItems: 100
+                    }
+                  }
+                }
+              });
+            } catch (err3) {
+              console.warn('[Picker] All configured creations failed, falling back to empty body.');
+              response = await client.request({
+                url: 'https://photospicker.googleapis.com/v1/sessions',
+                method: 'POST',
+                data: {}
+              });
+            }
+         }
+      }
+
+      console.log(`[Picker] Session created successfully. ID: ${(response.data as any).id}`);
       
       // Save session again just in case (e.g. if tokens were refreshed)
       req.session.save(() => {
@@ -311,16 +359,43 @@ async function startServer() {
       });
 
       const data = response.data as any;
-      console.log(`[Picker] GET /v1/sessions/${sessionId} returned status: ${response.status}`);
-      console.log(`[Picker] Response data keys: ${Object.keys(data).join(', ')}`);
+      console.log(`[Picker] GET /v1/sessions/${sessionId} - Status: ${response.status}`);
       
-      const items = data.mediaItems || data.media_items || data.pickedMediaItems || data.picked_media_items || [];
-      console.log(`[Picker] Found ${items.length} items in session. State: ${data.state || 'N/A'}`);
-      
-      if (items.length > 0) {
-        console.log(`[Picker] First item keys: ${Object.keys(items[0]).join(', ')}`);
+      const isSet = data.mediaItemsSet === true || data.media_items_set === true;
+      let items = data.mediaItems || data.media_items || data.pickedMediaItems || data.picked_media_items || [];
+
+      // If media items are marked as set but the array is empty, fetch from the sub-resource
+      if (isSet && items.length === 0) {
+        console.log(`[Picker] mediaItemsSet is true but array is empty. Fetching from /v1/mediaItems?sessionId=${sessionId}`);
+        try {
+          const itemsResponse = await client.request({
+            url: `https://photospicker.googleapis.com/v1/mediaItems`,
+            method: 'GET',
+            params: { sessionId }
+          });
+          const itemsData = itemsResponse.data as any;
+          items = itemsData.mediaItems || itemsData.media_items || itemsData.pickedMediaItems || itemsData.picked_media_items || [];
+          
+          if (items.length > 0) {
+            console.log(`[Picker] /v1/mediaItems returned ${items.length} items. First item keys: ${Object.keys(items[0]).join(', ')}`);
+          } else {
+            console.log(`[Picker] /v1/mediaItems was empty, trying sub-resource /v1/sessions/${sessionId}/mediaItems`);
+            const subRes = await client.request({
+              url: `https://photospicker.googleapis.com/v1/sessions/${sessionId}/mediaItems`,
+              method: 'GET'
+            });
+            const subData = subRes.data as any;
+            items = subData.mediaItems || subData.media_items || [];
+            console.log(`[Picker] Sub-resource returned ${items.length} items`);
+          }
+          
+          data.mediaItems = items; // Inject into response for frontend
+        } catch (itemsError: any) {
+          console.warn('[Picker] Failed to fetch mediaItems:', itemsError.response?.data || itemsError.message);
+        }
       }
       
+      console.log(`[Picker] Final session response - items: ${items.length}, isSet: ${isSet}`);
       res.json(data);
     } catch (error: any) {
       const errorData = error.response?.data;
@@ -458,38 +533,51 @@ async function startServer() {
 
   app.get('/api/photos/proxy', async (req, res) => {
     const { url } = req.query;
-    if (!url || typeof url !== 'string') return res.status(400).send('URL is required');
+    if (!url || typeof url !== 'string') {
+      console.warn('[Proxy] URL missing or invalid type');
+      return res.status(400).send('URL is required');
+    }
 
     // Security check: Only allow images from Google or Unsplash
     let isAllowed = false;
     let isGoogleApiUrl = false;
+    let isGoogleUserContent = false;
+    
     try {
       const parsedUrl = new URL(url);
-      isAllowed = 
-        parsedUrl.hostname === 'images.unsplash.com' ||
-        parsedUrl.hostname === 'googleapis.com' ||
-        parsedUrl.hostname.endsWith('.googleapis.com') ||
-        parsedUrl.hostname === 'googleusercontent.com' ||
-        parsedUrl.hostname.endsWith('.googleusercontent.com');
+      const hostname = parsedUrl.hostname;
+      
+      const isGoogleDomain = 
+        hostname === 'googleapis.com' ||
+        hostname.endsWith('.googleapis.com') ||
+        hostname === 'googleusercontent.com' ||
+        hostname.endsWith('.googleusercontent.com');
 
-      isGoogleApiUrl =
-        parsedUrl.hostname === 'googleapis.com' ||
-        parsedUrl.hostname.endsWith('.googleapis.com') ||
-        parsedUrl.hostname === 'googleusercontent.com' ||
-        parsedUrl.hostname.endsWith('.googleusercontent.com');
+      isAllowed = 
+        hostname === 'images.unsplash.com' || isGoogleDomain;
+
+      isGoogleApiUrl = isGoogleDomain;
+        
     } catch (e) {
+      console.warn('[Proxy] Invalid URL string:', url);
       return res.status(400).send('Invalid URL');
     }
 
     if (!isAllowed) {
+      console.warn('[Proxy] Forbidden domain:', url);
       return res.status(403).send('Proxying this domain is not allowed');
     }
 
     try {
-      const headers: Record<string, string> = {};
+      const headers: Record<string, string> = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
 
+      // Both photospicker.googleapis.com and googleusercontent.com (baseUrl) 
+      // often require the token in the new Picker API v1
       if (isGoogleApiUrl) {
         if (!req.session.googleTokens) {
+          console.warn('[Proxy] Missing tokens for Google API URL');
           return res.status(401).send('Not authenticated with Google');
         }
 
@@ -503,21 +591,27 @@ async function startServer() {
             headers['Authorization'] = `Bearer ${accessToken}`;
           }
         } catch (tokenError) {
-           console.error('Failed to get access token for proxy:', tokenError);
+           console.error('[Proxy] Failed to refresh/get access token:', tokenError);
            return res.status(401).send('Failed to authenticate with Google');
         }
       }
 
+      console.log(`[Proxy] Fetching: ${url.substring(0, 80)}...`);
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
-        headers
+        headers,
+        timeout: 10000 // 10s timeout
       });
 
       const contentType = response.headers['content-type'] as string || 'image/jpeg';
       res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
       res.send(response.data);
-    } catch (error) {
-      console.error('Photo Proxy Error:', error);
+    } catch (error: any) {
+      console.error('[Proxy] Error fetching photo:', error.response?.status || error.message, url.substring(0, 60));
+      if (error.response?.status) {
+        return res.status(error.response.status).send(`Failed to fetch photo: Upsream returned ${error.response.status}`);
+      }
       res.status(500).send('Failed to fetch photo');
     }
   });

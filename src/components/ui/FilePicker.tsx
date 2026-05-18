@@ -190,35 +190,31 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       } else {
         // Polling as a fallback to postMessage
         let pollCount = 0;
-        const maxPolls = 5;
         const pollTimer = setInterval(() => {
           if (pickerWindow.closed) {
             clearInterval(pollTimer);
-            // If the ref is still set, it means postMessage wasn't received or didn't trigger yet
             if (activeSessionIdRef.current === sessionId) {
-              console.log('Picker window closed, starting poll for results...');
+              console.log('Picker window closed, starting persistent poll for results...');
               
               const pollForResults = async () => {
-                if (activeSessionIdRef.current !== sessionId && pollCount > 0) return;
+                // Stop if the session was cleared by something else (e.g. a postMessage success)
+                if (activeSessionIdRef.current !== sessionId) return;
                 
                 pollCount++;
-                console.log(`Polling attempt ${pollCount}/${maxPolls} for session ${sessionId}`);
+                console.log(`Polling attempt ${pollCount} for session ${sessionId}`);
                 
                 const foundItems = await fetchPickerResults(sessionId, false);
                 
-                if (!foundItems && pollCount < maxPolls && activeSessionIdRef.current === sessionId) {
-                  console.log('No items found yet, retrying in 2 seconds...');
-                  setTimeout(pollForResults, 2000);
-                } else if (!foundItems && pollCount >= maxPolls) {
+                if (!foundItems && activeSessionIdRef.current === sessionId) {
+                  // Continue polling every 3 seconds to be polite but persistent
+                  setTimeout(pollForResults, 3000);
+                } else if (foundItems) {
                   activeSessionIdRef.current = null;
-                  setError('No photos were returned from your selection. Please try again.');
-                } else {
-                   activeSessionIdRef.current = null;
                 }
               };
 
-              // First poll after a short delay
-              setTimeout(pollForResults, 1000);
+              // Start first poll after a brief wait
+              setTimeout(pollForResults, 1500);
             }
           }
         }, 1000);
@@ -239,33 +235,55 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       const res = await fetch(`/api/photos/picker/items?sessionId=${sessionId}`, { credentials: 'include' });
       const data = await res.json();
       
-      console.log(`[Picker] Backend returned status ${res.status}. Data keys:`, Object.keys(data));
+      console.log(`[Picker] Backend response status ${res.status}. Keys: ${Object.keys(data).join(', ')}. State: ${data.state}`);
       
       if (!res.ok) throw new Error(data.error || 'Failed to fetch chosen photos');
       
       const items = data.mediaItems || data.media_items || data.pickedMediaItems || data.picked_media_items;
-      if (items && items.length > 0) {
+      
+    if (items && items.length > 0) {
         console.log(`[Picker] Found ${items.length} items in picker session`);
         
         for (const nestedItem of items) {
-          const mediaItem = nestedItem.mediaItem || nestedItem.media_item || {};
-          const item = {
-            ...mediaItem,
-            mediaFileUri: nestedItem.mediaFileUri || nestedItem.media_file_uri
-          };
+          // Normalize the item: sometimes it is nested inside a mediaItem property
+          const item = nestedItem.mediaItem || nestedItem.media_item || nestedItem;
+          
+          console.log('[Picker] Individual item details:', JSON.stringify(item));
           await handleSelectGooglePhoto(item);
         }
         return true;
-      } else if (wasExplicitSuccess) {
-        console.warn('[Picker] No items found in picker session data after explicit success:', data);
-        setError('No photos were returned. Did you forget to click "Done"?');
+      } else {
+        // If no items yet, check if the user has at least made a selection
+        const isSet = data.mediaItemsSet === true || data.media_items_set === true;
+        const isFinished = isSet || ['PICKING_FINISHED', 'COMPLETED', 'CLOSED'].includes(data.state);
+        
+        if (isFinished) {
+          if (isSet && (!items || items.length === 0)) {
+            // This is the weird state: selection made but no items in response
+            console.warn('[Picker] mediaItemsSet is true but items array is missing or empty. This often means processing is still happening or the endpoint was incorrect. Data:', data);
+          }
+          
+          if (items && items.length > 0) {
+            console.log(`[Picker] Selection confirmed with ${items.length} items.`);
+            // items already handled above if items.length > 0
+          } else if (wasExplicitSuccess) {
+            setError('No photos were returned. Did you click "Done" without selecting any?');
+          } else if (isSet && (!items || items.length === 0)) {
+            setError('Selection saved, but we couldn\'t retrieve the photos. Please try again.');
+          } else {
+            // Probably cancelled
+            console.log('[Picker] Session finished without selection.');
+          }
+          return true; // Stop polling
+        }
+        
+        // If not set and not finished, keep polling
         return false;
       }
-      return false;
     } catch (err: any) {
       console.error('[Picker] Fetch picked items failed:', err);
       setError(err.message || 'Failed to retrieve selected photos.');
-      return false;
+      return true; // Stop polling on hard error
     } finally {
       setGoogleLoading(false);
       setUploading(false);
@@ -333,17 +351,44 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
   };
 
   const handleSelectGooglePhoto = async (photo: any) => {
-    console.log('[Picker] Selecting photo:', photo.id || photo.filename || 'unknown');
+    console.log('[Picker] Selecting photo object:', JSON.stringify(photo).substring(0, 500));
     setUploading(true);
     setError(null);
     try {
       // Picker API provides mediaFileUri for downloading
-      const downloadUrl = photo.mediaFileUri || photo.media_file_uri || `${photo.baseUrl || photo.base_url}=d`;
-      console.log('[Picker] Proxying from URL:', downloadUrl.substring(0, 50) + '...');
+      // Library API provides baseUrl
+      let downloadUrl = photo.mediaFileUri || photo.media_file_uri;
+      
+      // The Picker API v1 seems to nest the baseUrl inside a mediaFile object
+      if (!downloadUrl && photo.mediaFile?.baseUrl) {
+        downloadUrl = photo.mediaFile.baseUrl;
+      } else if (!downloadUrl && photo.media_file?.base_url) {
+        downloadUrl = photo.media_file.base_url;
+      }
+      
+      // Fallback to top-level baseUrl
+      if (!downloadUrl && (photo.baseUrl || photo.base_url)) {
+        downloadUrl = photo.baseUrl || photo.base_url;
+      }
+
+      if (downloadUrl && !downloadUrl.includes('=d')) {
+        downloadUrl = `${downloadUrl}=d`;
+      }
+
+      if (!downloadUrl) {
+         console.warn('[Picker] No valid download URL found in photo object keys:', Object.keys(photo));
+         throw new Error('This photo is not available for download yet. Please try again in a moment.');
+      }
+
+      console.log('[Picker] Proxying from URL (sanitized):', downloadUrl.split('?')[0].substring(0, 80) + '...');
       const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(downloadUrl)}`;
       const res = await fetch(proxyUrl, { credentials: 'include' });
       
-      if (!res.ok) throw new Error(`Proxy failed with status ${res.status}`);
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[Picker] Proxy failed: ${res.status} ${errorText}`);
+        throw new Error(`Cloud proxy error (${res.status}). Higher quality might be needed?`);
+      }
       
       const blob = await res.blob();
       console.log(`[Picker] Downloaded blob: ${blob.size} bytes. Type: ${blob.type}`);
