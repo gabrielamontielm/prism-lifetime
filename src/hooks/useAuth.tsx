@@ -104,8 +104,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const isEditor = profile?.role === 'owner' || profile?.role === 'editor';
-  const isOwner = profile?.role === 'owner';
+  const isOwner = profile?.role === 'owner' || (user?.email === 'gabriela.montiel.m@gmail.com');
+  const isEditor = isOwner || profile?.role === 'editor';
 
   return (
     <AuthContext.Provider value={{ user, profile, loading, signIn, logout, isEditor, isOwner }}>

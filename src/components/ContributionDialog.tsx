@@ -55,7 +55,7 @@ export function ContributionDialog({ eventId, onClose, onSuccess }: { eventId: s
           <div className="grid grid-cols-3 gap-3">
             {photos.map((photo, idx) => (
               <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden border border-prism-100">
-                <img src={photo} alt="" className="w-full h-full object-cover" />
+                <img src={photo || undefined} alt="" className="w-full h-full object-cover" />
                 <button 
                   type="button"
                   onClick={() => setPhotos(p => p.filter((_, i) => i !== idx))}

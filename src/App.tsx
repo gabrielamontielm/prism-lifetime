@@ -9,11 +9,13 @@ import { FilterBar } from './components/FilterBar';
 import { MapView } from './components/MapView';
 import { StorySlideshow } from './components/StorySlideshow';
 import { BentoView } from './components/BentoView';
+import { HorizontalView } from './components/HorizontalView';
 import { useTimeline } from './hooks/useTimeline';
 import { useAuth } from './hooks/useAuth';
 import { LifeEvent } from './types';
 import { motion, AnimatePresence } from 'motion/react';
 import { Loader2 } from 'lucide-react';
+import { Button } from './components/ui/Button';
 import { APIProvider } from '@vis.gl/react-google-maps';
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
@@ -32,7 +34,7 @@ function Dashboard() {
 
   const [search, setSearch] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'standard' | 'compact' | 'map' | 'story' | 'bento'>('compact');
+  const [viewMode, setViewMode] = useState<'standard' | 'compact' | 'map' | 'story' | 'bento' | 'horizontal'>('horizontal');
 
   useEffect(() => {
     if (!loading && events.length > 0) {
@@ -64,6 +66,8 @@ function Dashboard() {
     const matchesTag = !selectedTag || e.tags.includes(selectedTag);
     return matchesSearch && matchesTag;
   });
+
+  const isEmpty = !loading && filteredEvents.length === 0;
 
   if (!user && !shareToken) {
     return (
@@ -146,6 +150,27 @@ function Dashboard() {
               <p className="text-red-500 font-medium">Failed to synchronize your timeline.</p>
               <p className="text-sm text-red-400 mt-2">Please check your permissions or try again later.</p>
             </div>
+          ) : isEmpty ? (
+            <div className="text-center py-32 bg-prism-50/50 rounded-[2rem] border-2 border-dashed border-prism-200">
+              <div className="max-w-md mx-auto space-y-6">
+                <div className="w-20 h-20 bg-white rounded-3xl shadow-xl shadow-prism-900/5 flex items-center justify-center mx-auto mb-8">
+                  <div className="w-10 h-10 rounded-xl bg-accent-blue/10 flex items-center justify-center text-accent-blue font-bold">
+                    ?
+                  </div>
+                </div>
+                <h3 className="text-2xl font-bold text-prism-900 font-display">No memories found</h3>
+                <p className="text-prism-500 leading-relaxed">
+                  {search || selectedTag 
+                    ? "We couldn't find any milestones matching your filters. Try adjusting your search."
+                    : "Your prism is currently clear. Start chronicling your journey by adding your first life milestone."}
+                </p>
+                {!shareToken && (
+                  <Button variant="prism" onClick={() => setIsCreating(true)} className="rounded-2xl px-8">
+                    Create Your First Entry
+                  </Button>
+                )}
+              </div>
+            </div>
           ) : viewMode === 'map' ? (
             <MapView 
               events={filteredEvents} 
@@ -159,6 +184,11 @@ function Dashboard() {
             />
           ) : viewMode === 'bento' ? (
             <BentoView 
+              events={filteredEvents} 
+              onEventClick={(event) => setSelectedEvent(event)} 
+            />
+          ) : viewMode === 'horizontal' ? (
+            <HorizontalView 
               events={filteredEvents} 
               onEventClick={(event) => setSelectedEvent(event)} 
             />

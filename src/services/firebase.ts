@@ -23,7 +23,7 @@ if (!firebaseConfigClean.apiKey) {
 
 const app = !getApps().length ? initializeApp(firebaseConfigClean) : getApp();
 
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 

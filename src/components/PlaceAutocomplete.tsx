@@ -15,7 +15,7 @@ interface PlaceAutocompleteProps {
 
 export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAutocompleteProps) {
   const [inputValue, setInputValue] = useState(defaultValue);
-  const [predictions, setPredictions] = useState<google.maps.places.AutocompletePrediction[]>([]);
+  const [predictions, setPredictions] = useState<google.maps.places.AutocompleteSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [showPredictions, setShowPredictions] = useState(false);
   
@@ -23,16 +23,11 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
   const hasValidMapsKey = Boolean(GOOGLE_MAPS_API_KEY) && GOOGLE_MAPS_API_KEY !== '';
   
   const placesLib = hasValidMapsKey ? useMapsLibrary('places') : null;
-  const autocompleteService = useRef<google.maps.places.AutocompleteService | null>(null);
-  const placesService = useRef<google.maps.places.PlacesService | null>(null);
   
   const sessionToken = useRef<google.maps.places.AutocompleteSessionToken | null>(null);
 
   useEffect(() => {
     if (!placesLib) return;
-    autocompleteService.current = new placesLib.AutocompleteService();
-    // PlacesService needs a dummy element if we don't have a map yet, or we can just use the library
-    placesService.current = new placesLib.PlacesService(document.createElement('div'));
     sessionToken.current = new placesLib.AutocompleteSessionToken();
   }, [placesLib]);
 
@@ -47,52 +42,63 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
       return;
     }
 
-    if (!autocompleteService.current) return;
+    if (!placesLib) return;
 
     setLoading(true);
-    autocompleteService.current.getPlacePredictions(
-      { 
+    try {
+      const { suggestions } = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
         input: value,
         sessionToken: sessionToken.current || undefined
-      },
-      (results, status) => {
-        setLoading(false);
-        if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-          setPredictions(results);
-          setShowPredictions(true);
-        } else {
-          setPredictions([]);
-          setShowPredictions(false);
-        }
-      }
-    );
+      });
+      
+      setPredictions(suggestions || []);
+      setShowPredictions(true);
+    } catch (error) {
+      console.error('Autocomplete fetch failed:', error);
+      setPredictions([]);
+      setShowPredictions(false);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const selectPlace = (prediction: google.maps.places.AutocompletePrediction) => {
-    setInputValue(prediction.description);
+  const selectPlace = async (suggestion: google.maps.places.AutocompleteSuggestion) => {
+    const prediction = suggestion.placePrediction;
+    if (!prediction) return;
+
+    setInputValue(prediction.text.toString());
     setShowPredictions(false);
     
-    if (!placesService.current || !placesLib) return;
+    if (!placesLib) return;
 
-    placesService.current.getDetails(
-      {
-        placeId: prediction.place_id,
-        fields: ['formatted_address', 'geometry', 'place_id'],
-        sessionToken: sessionToken.current || undefined
-      },
-      (place, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry?.location) {
-          onPlaceSelect({
-            address: place.formatted_address || prediction.description,
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng(),
-            placeId: place.place_id || prediction.place_id
-          });
-          // Refresh session token for next search
-          sessionToken.current = new placesLib.AutocompleteSessionToken();
-        }
+    try {
+      const place = new placesLib.Place({ id: prediction.placeId });
+      
+      // Use fetchFields (New API) instead of PlacesService.getDetails (Legacy)
+      await place.fetchFields({
+        fields: ['formattedAddress', 'location', 'id']
+      });
+
+      if (place.location) {
+        onPlaceSelect({
+          address: place.formattedAddress || prediction.text.toString(),
+          lat: place.location.lat(),
+          lng: place.location.lng(),
+          placeId: place.id || prediction.placeId
+        });
+        // Refresh session token for next search
+        sessionToken.current = new placesLib.AutocompleteSessionToken();
       }
-    );
+    } catch (error) {
+      console.error('Error fetching place details:', error);
+      // Fallback if detail fetch fails
+      onPlaceSelect({
+        address: prediction.text.toString(),
+        lat: 0,
+        lng: 0,
+        placeId: prediction.placeId
+      });
+    }
   };
 
   if (!hasValidMapsKey) {
@@ -133,19 +139,24 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
 
       {showPredictions && predictions.length > 0 && (
         <div className="absolute z-50 w-full mt-1 bg-white border border-prism-100 rounded-xl shadow-xl overflow-hidden max-h-60 overflow-y-auto translate-y-[-8px]">
-          {predictions.map(p => (
-            <button
-              key={p.place_id}
-              onClick={() => selectPlace(p)}
-              className="w-full flex items-start gap-3 p-3 text-left hover:bg-prism-50 transition-colors border-b border-prism-50 last:border-0"
-            >
-              <MapPin size={16} className="text-accent-blue mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-bold text-prism-800 line-clamp-1">{p.structured_formatting.main_text}</p>
-                <p className="text-xs text-prism-500 line-clamp-1">{p.structured_formatting.secondary_text}</p>
-              </div>
-            </button>
-          ))}
+          {predictions.map((suggestion, index) => {
+            const prediction = suggestion.placePrediction;
+            if (!prediction) return null;
+            
+            return (
+              <button
+                key={prediction.placeId || index}
+                onClick={() => selectPlace(suggestion)}
+                className="w-full flex items-start gap-3 p-3 text-left hover:bg-prism-50 transition-colors border-b border-prism-50 last:border-0"
+              >
+                <MapPin size={16} className="text-accent-blue mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-prism-800 line-clamp-1">{prediction.mainText.toString()}</p>
+                  <p className="text-xs text-prism-500 line-clamp-1">{prediction.secondaryText.toString()}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

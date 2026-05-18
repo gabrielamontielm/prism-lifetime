@@ -39,7 +39,7 @@ function MarkerWithInfoWindow({ event, onClick }: MarkerWithInfoWindowProps) {
           <div className="p-2 max-w-[240px]">
             {event.primaryPhoto && (
               <img 
-                src={event.primaryPhoto} 
+                src={event.primaryPhoto || undefined} 
                 alt={event.title} 
                 className="w-full h-32 object-cover rounded-xl mb-3"
                 referrerPolicy="no-referrer"

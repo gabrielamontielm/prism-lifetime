@@ -2,5 +2,5 @@
   "name": "Prism: Your Collective Lifetime",
   "description": "A collaborative timeline for chronicling life achievements and milestones with shared perspectives.",
   "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

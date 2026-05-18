@@ -232,7 +232,7 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
                     className="aspect-square rounded-2xl overflow-hidden border border-prism-100 shadow-sm"
                   >
                     <img 
-                      src={photo} 
+                      src={photo || undefined} 
                       alt={`Gallery item ${i + 1}`} 
                       className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
@@ -282,7 +282,7 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
                         {contribution.photos.map((p, i) => (
                           <img 
                             key={i} 
-                            src={p} 
+                            src={p || undefined} 
                             alt="" 
                             className="w-20 h-20 rounded-xl object-cover border border-prism-100 shrink-0" 
                             referrerPolicy="no-referrer"

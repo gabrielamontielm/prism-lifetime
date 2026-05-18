@@ -1,12 +1,13 @@
 import React, { useState, useRef } from 'react';
-import { Camera, Loader2, CheckCircle2, AlertCircle, Trash2, Upload, Box, Image as ImageIcon } from 'lucide-react';
+import { Camera, Loader2, CheckCircle2, AlertCircle, Trash2, Upload, Box, Image as ImageIcon, Search, Link } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uploadFile } from '../../services/storage';
 import { resizeImage } from '../../lib/image';
 import { Button } from './Button';
+import { Dialog } from './Dialog';
 import { cn } from '../../lib/utils';
 
-type ImageSource = 'upload' | 'camera' | 'google';
+type ImageSource = 'upload' | 'camera' | 'google' | 'search' | 'url';
 
 interface FilePickerProps {
   onUploadComplete: (url: string) => void;
@@ -20,6 +21,16 @@ interface FilePickerProps {
 
 export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl: initialPreview, compact, resetAfterUpload }: FilePickerProps) {
   const [source, setSource] = useState<ImageSource>('upload');
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googlePhotos, setGooglePhotos] = useState<any[]>([]);
+  const [googleAlbums, setGoogleAlbums] = useState<any[]>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string | null>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<'picker' | 'library'>(googleConnected ? 'library' : 'picker');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [preview, setPreview] = useState<string | null>(initialPreview || null);
@@ -27,6 +38,245 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [currentObjectURL, setCurrentObjectURL] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    checkGoogleStatus();
+  }, []);
+
+  React.useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Validate origin is from AI Studio preview
+      const isAllowedOrigin = event.origin.endsWith('.run.app') || 
+                             event.origin.includes('localhost') || 
+                             event.origin === window.location.origin;
+      
+      if (!isAllowedOrigin) return;
+      
+      if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.provider === 'google') {
+        console.log('Received OAUTH_AUTH_SUCCESS from origin:', event.origin);
+        setGoogleConnected(true);
+        setSource('google');
+        checkGoogleStatus();
+      }
+
+      if (event.data?.type === 'PICKER_SUCCESS' && event.data?.sessionId) {
+        console.log('Google Picker success. Session:', event.data.sessionId);
+        fetchPickerResults(event.data.sessionId);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  React.useEffect(() => {
+    if (googleConnected && source === 'google' && googlePhotos.length === 0 && !googleLoading) {
+       if (viewMode === 'library') fetchGooglePhotos();
+    }
+  }, [googleConnected, source, viewMode]);
+
+  const checkGoogleStatus = async () => {
+    try {
+      const res = await fetch('/api/auth/google/status', { credentials: 'include' });
+      const data = await res.json();
+      setGoogleConnected(data.connected);
+      if (data.connected && viewMode === 'library') {
+        fetchGooglePhotos();
+      }
+    } catch (err) {
+      console.error('Status check failed:', err);
+    }
+  };
+
+  const fetchGooglePhotos = async (albumId?: string) => {
+    setGoogleLoading(true);
+    setError(null);
+    const effectiveAlbumId = albumId || selectedAlbumId;
+    try {
+      const url = effectiveAlbumId ? `/api/photos?albumId=${effectiveAlbumId}` : '/api/photos';
+      const res = await fetch(url, { credentials: 'include' });
+      
+      if (res.status === 401) {
+        setGoogleConnected(false);
+        return;
+      }
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to fetch photos');
+      }
+
+      setGooglePhotos(data.mediaItems || []);
+
+      // If library is empty, try fetching albums to give the user another way
+      if (!effectiveAlbumId && (!data.mediaItems || data.mediaItems.length === 0)) {
+        fetchGoogleAlbums();
+      }
+    } catch (err: any) {
+      console.error('Fetch photos failed:', err);
+      setError(err.message || 'Could not load your Google photos.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  const fetchGoogleAlbums = async () => {
+    try {
+      const res = await fetch('/api/albums', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setGoogleAlbums(data.albums || []);
+      }
+    } catch (err) {
+      console.error('Fetch albums failed:', err);
+    }
+  };
+
+  const handleOpenPicker = async () => {
+    setError(null);
+    
+    // If we think we aren't connected, do the auth flow directly
+    if (!googleConnected) {
+      handleConnectGoogle();
+      return;
+    }
+
+    const pickerWindow = window.open('/api/photos/picker/start', 'google_photos_picker', 'width=600,height=700');
+    if (!pickerWindow) {
+      setError('Popup was blocked. Please allow popups for this site.');
+    }
+  };
+
+  const fetchPickerResults = async (sessionId: string) => {
+    setGoogleLoading(true);
+    setUploading(true);
+    try {
+      const res = await fetch(`/api/photos/picker/items?sessionId=${sessionId}`, { credentials: 'include' });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Failed to fetch chosen photos');
+      
+      if (data.mediaItems && data.mediaItems.length > 0) {
+        // Just take the first one for now if user picked multiple but we only need one
+        const item = data.mediaItems[0];
+        await handleSelectGooglePhoto(item);
+      }
+    } catch (err: any) {
+      console.error('Fetch picked items failed:', err);
+      setError(err.message || 'Failed to retrieve selected photos.');
+    } finally {
+      setGoogleLoading(false);
+      setUploading(false);
+    }
+  };
+
+  const handleConnectGoogle = async () => {
+    setError(null);
+    const authWindow = window.open('/api/auth/google/login', 'google_photos_auth', 'width=600,height=700');
+    if (!authWindow) {
+      setError('Popup was blocked. Please allow popups for this site.');
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return;
+    setSearchLoading(true);
+    try {
+      const res = await fetch(`/api/search/images?q=${encodeURIComponent(searchQuery)}`, { credentials: 'include' });
+      const data = await res.json();
+      setSearchResults(data.results || []);
+    } catch (err) {
+      console.error('Search failed:', err);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleUrlSubmit = async () => {
+    if (!imageUrl.trim()) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(imageUrl)}`;
+      const res = await fetch(proxyUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error('Could not fetch image from URL');
+      
+      const blob = await res.blob();
+      const file = new File([blob], 'url-image.jpg', { type: 'image/jpeg' });
+      await performUpload(file);
+      setImageUrl('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to load image from URL');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSelectSearchPhoto = async (photo: any) => {
+    setUploading(true);
+    setError(null);
+    try {
+      const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(photo.urls.regular)}`;
+      const res = await fetch(proxyUrl, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to download search result');
+      
+      const blob = await res.blob();
+      const file = new File([blob], `unsplash-${photo.id}.jpg`, { type: 'image/jpeg' });
+      await performUpload(file);
+    } catch (err: any) {
+      setError('Failed to process search result');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleSelectGooglePhoto = async (photo: any) => {
+    setUploading(true);
+    setError(null);
+    try {
+      // Picker API provides mediaFileUri for downloading
+      const downloadUrl = photo.mediaFileUri || `${photo.baseUrl}=d`;
+      const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(downloadUrl)}`;
+      const res = await fetch(proxyUrl, { credentials: 'include' });
+      
+      if (!res.ok) throw new Error('Failed to download photo from Google');
+      
+      const blob = await res.blob();
+      const file = new File([blob], `${photo.id || 'google-photo'}.jpg`, { type: 'image/jpeg' });
+      
+      await performUpload(file);
+    } catch (err: any) {
+      console.error('Google Photo selection failed:', err);
+      setError('Could not download photo. Please try again.');
+      setUploading(false);
+    }
+  };
+
+  const performUpload = async (file: File) => {
+    try {
+      const resizedBlob = await resizeImage(file, { maxWidth: 1600, maxHeight: 1600, quality: 0.85 });
+      const finalFile = new File([resizedBlob], file.name, { type: 'image/jpeg' });
+      
+      const downloadURL = await uploadFile(finalFile, path || 'uploads', (p) => {
+        setProgress(p);
+      });
+
+      setPreview(downloadURL);
+      onUploadComplete(downloadURL);
+      
+      if (resetAfterUpload) {
+        setTimeout(() => {
+          setPreview(null);
+          setProgress(0);
+        }, 1500);
+      }
+    } catch (err: any) {
+      console.error('Upload Error:', err);
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   React.useEffect(() => {
     setPreview(initialPreview || null);
@@ -61,52 +311,19 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
     setError(null);
     setProgress(0);
 
-    try {
-      // 1. Optimize
-      const optimizedBlob = await resizeImage(file, {
-        maxWidth: 1200,
-        quality: 0.7,
-        format: 'image/jpeg'
-      });
-
-      // 2. Transmit
-      const safeFilename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`;
-      const finalFile = new File([optimizedBlob], safeFilename, { type: 'image/jpeg' });
-      
-      const downloadUrl = await uploadFile(finalFile, path, (p) => setProgress(p));
-      
-      // 3. Finalize
-      onUploadComplete(downloadUrl);
-      
-      if (resetAfterUpload) {
-        setPreview(null);
-        if (currentObjectURL) URL.revokeObjectURL(currentObjectURL);
-        setCurrentObjectURL(null);
-      }
-    } catch (err: any) {
-      console.error('[FilePicker] Upload failed:', err);
-      const message = err.message || 'Transmission failed';
-      setError(`${message}. Please try again.`);
-      
-      if (!initialPreview) {
-        setPreview(null);
-      } else {
-        setPreview(initialPreview);
-      }
-    } finally {
-      setUploading(false);
-      // Reset inputs
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      if (cameraInputRef.current) cameraInputRef.current.value = '';
-    }
+    await performUpload(file);
+    
+    // Reset inputs
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
   };
 
   const Sources = () => (
-    <div className="flex gap-1 p-1 bg-prism-50 rounded-xl mb-3">
+    <div className="flex gap-1 p-1 bg-prism-50 rounded-xl mb-3 overflow-x-auto no-scrollbar">
       <button 
         onClick={() => setSource('upload')}
         className={cn(
-          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          "flex-none flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
           source === 'upload' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
         )}
       >
@@ -116,7 +333,7 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       <button 
         onClick={() => setSource('camera')}
         className={cn(
-          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          "flex-none flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
           source === 'camera' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
         )}
       >
@@ -126,12 +343,35 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       <button 
         onClick={() => setSource('google')}
         className={cn(
-          "flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          "flex-none flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all relative",
           source === 'google' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
         )}
       >
         <ImageIcon size={14} />
         Photos
+        {googleConnected && (
+          <div className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full border border-white shadow-sm" />
+        )}
+      </button>
+      <button 
+        onClick={() => setSource('search')}
+        className={cn(
+          "flex-none flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          source === 'search' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+        )}
+      >
+        <Search size={14} />
+        Search
+      </button>
+      <button 
+        onClick={() => setSource('url')}
+        className={cn(
+          "flex-none flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all",
+          source === 'url' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+        )}
+      >
+        <Link size={14} />
+        URL
       </button>
     </div>
   );
@@ -146,13 +386,21 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
           onClick={() => {
             if (source === 'camera') cameraInputRef.current?.click();
             else if (source === 'upload') fileInputRef.current?.click();
-            // Google Photos toggle would go here
+            else if (source === 'google') {
+              if (googleConnected) {
+                // In compact mode, we might want to show a small selection dialog 
+                // but for now, we'll try the safe picker first
+                handleOpenPicker();
+              } else {
+                handleOpenPicker(); // This will trigger handleConnectGoogle
+              }
+            }
           }}
-          disabled={uploading}
+          disabled={uploading || googleLoading}
           className="w-full h-full flex flex-col items-center justify-center gap-2 border-2 border-dashed border-prism-100 rounded-xl hover:border-accent-blue hover:bg-accent-blue/5 transition-all group overflow-hidden relative"
         >
           {preview ? (
-            <img src={preview} alt="Preview" className="w-full h-full object-cover" />
+            <img src={preview || undefined} alt="Preview" className="w-full h-full object-cover" />
           ) : (
             <>
               {source === 'upload' && <Upload size={20} className="text-prism-300" />}
@@ -162,7 +410,7 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
             </>
           )}
 
-          {uploading && (
+          {(uploading || googleLoading) && (
             <div className="absolute inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center">
               <Loader2 className="animate-spin text-accent-blue" size={20} />
             </div>
@@ -210,7 +458,7 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
 
         {preview && !uploading ? (
           <div className="absolute inset-0 group">
-            <img src={preview} alt="Upload preview" className="w-full h-full object-cover" />
+            <img src={preview || undefined} alt="Upload preview" className="w-full h-full object-cover" />
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
               <Button 
                 variant="secondary" 
@@ -258,19 +506,254 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
             </div>
           </button>
         ) : !uploading && source === 'google' ? (
-          <div className="flex flex-col items-center gap-4 text-center">
-             <div className="p-4 bg-accent-blue/5 rounded-full text-accent-blue">
-                <Box size={32} className="animate-pulse" />
-             </div>
-             <div className="space-y-1">
-                <p className="text-sm font-bold text-prism-900">Google Photos Integration</p>
-                <p className="text-xs text-prism-400 max-w-[240px]">
-                  Requires Google Cloud Platform setup. Connect your account to select directly from your library.
-                </p>
-             </div>
-             <Button variant="outline" size="sm" className="rounded-full">
-                Connect Google Account
-             </Button>
+          <div className="w-full h-full flex flex-col p-4 relative">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex gap-2 p-1 bg-prism-50 rounded-lg w-fit">
+                <button 
+                  onClick={() => setViewMode('library')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                    viewMode === 'library' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+                  )}
+                >
+                  Gallery
+                </button>
+                <button 
+                  onClick={() => setViewMode('picker')}
+                  className={cn(
+                    "px-3 py-1.5 rounded-md text-[10px] font-bold transition-all",
+                    viewMode === 'picker' ? "bg-white text-prism-900 shadow-sm" : "text-prism-400 hover:text-prism-600"
+                  )}
+                >
+                  Picker
+                </button>
+              </div>
+
+              {googleConnected && (
+                <div className="flex gap-1">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7 rounded-lg text-prism-400"
+                    onClick={() => viewMode === 'library' ? fetchGooglePhotos() : handleOpenPicker()}
+                    disabled={googleLoading}
+                  >
+                    <Loader2 size={14} className={cn(googleLoading && "animate-spin")} />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {viewMode === 'picker' ? (
+              <div className="flex flex-col items-center justify-center flex-1">
+                <div className="flex flex-col items-center gap-4 text-center">
+                  <div className="p-4 bg-accent-blue/5 rounded-full text-accent-blue">
+                    <ImageIcon size={32} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-bold text-prism-900">Google Photos Picker</p>
+                    <p className="text-xs text-prism-400 max-w-[240px]">
+                      The secure, Google-hosted way to pick specific photos.
+                    </p>
+                  </div>
+                  <Button 
+                    variant="prism" 
+                    size="sm" 
+                    onClick={handleOpenPicker} 
+                    disabled={googleLoading}
+                    className="rounded-full shadow-lg shadow-accent-blue/20"
+                  >
+                    {googleLoading ? <Loader2 size={16} className="animate-spin mr-2" /> : null}
+                    {googleConnected ? 'Open Picker' : 'Connect & Select'}
+                  </Button>
+                  
+                  {googleConnected && (
+                    <p className="text-[10px] text-prism-400 max-w-[200px]">
+                      No photos appearing? Try the "Browse Library" tab instead.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col">
+                {!googleConnected ? (
+                   <div className="flex flex-col items-center justify-center flex-1 py-8 text-center gap-4">
+                     <AlertCircle size={32} className="text-prism-300" />
+                     <div className="space-y-1">
+                       <p className="text-sm font-bold text-prism-900">Connection Required</p>
+                       <p className="text-xs text-prism-500">Sign in to browse your full library here.</p>
+                     </div>
+                     <Button size="sm" onClick={handleConnectGoogle}>Sign In</Button>
+                   </div>
+                ) : googleLoading ? (
+                  <div className="flex flex-col items-center justify-center flex-1 py-12">
+                    <Loader2 size={32} className="animate-spin text-accent-blue mb-4" />
+                    <p className="text-xs text-prism-500">Syncing with library...</p>
+                  </div>
+                ) : (
+                  <div className="flex-1 overflow-y-auto no-scrollbar min-h-[200px]">
+                    <div className="grid grid-cols-3 gap-2">
+                      {selectedAlbumId && (
+                        <button
+                          onClick={() => {
+                            setSelectedAlbumId(null);
+                            setGooglePhotos([]);
+                            fetchGoogleAlbums();
+                          }}
+                          className="aspect-square flex flex-col items-center justify-center bg-prism-50 border border-dashed border-prism-200 rounded-lg hover:bg-prism-100 transition-all text-accent-blue"
+                        >
+                          <Box size={24} />
+                          <span className="text-[10px] font-bold mt-1">Back</span>
+                        </button>
+                      )}
+
+                      {googlePhotos.map((photo) => (
+                        <button
+                          key={photo.id}
+                          onClick={() => handleSelectGooglePhoto(photo)}
+                          className="aspect-square relative group rounded-lg overflow-hidden border border-prism-100 hover:border-accent-blue transition-all"
+                        >
+                          <img 
+                            src={`${photo.baseUrl}=w200-h200-c`} 
+                            alt="" 
+                            className="w-full h-full object-cover group-hover:scale-110 transition-transform" 
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                            <Upload size={20} className="text-white" />
+                          </div>
+                        </button>
+                      ))}
+
+                      {!selectedAlbumId && googleAlbums.map((album) => (
+                        <button
+                          key={album.id}
+                          onClick={() => {
+                            setSelectedAlbumId(album.id);
+                            fetchGooglePhotos(album.id);
+                          }}
+                          className="aspect-square relative group rounded-lg overflow-hidden border border-prism-100 hover:border-accent-blue transition-all bg-prism-50 flex flex-col"
+                        >
+                          {album.coverPhotoBaseUrl ? (
+                             <img 
+                               src={`${album.coverPhotoBaseUrl}=w200-h200-c`} 
+                               alt="" 
+                               className="w-full h-2/3 object-cover group-hover:scale-110 transition-transform" 
+                             />
+                          ) : (
+                            <div className="w-full h-2/3 bg-prism-100 flex items-center justify-center">
+                              <Box size={24} className="text-prism-300" />
+                            </div>
+                          )}
+                          <div className="p-1 px-2 h-1/3 flex items-center justify-center">
+                            <span className="text-[8px] font-bold text-prism-700 truncate line-clamp-2 leading-tight">{album.title}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    
+                    {googlePhotos.length === 0 && googleAlbums.length === 0 && (
+                      <div className="text-center py-6 px-4 bg-prism-50/50 rounded-2xl border border-prism-100 mt-4">
+                        <p className="text-sm font-bold text-prism-900 mb-2">Library Empty or Hidden</p>
+                        <p className="text-[10px] text-prism-500 mb-4 leading-relaxed bg-white p-3 rounded-xl border border-prism-50">
+                          During login, you <span className="font-bold underline">MUST</span> check:<br/>
+                          <span className="italic">"See your Google Photos library"</span>
+                        </p>
+                        <Button variant="ghost" size="xs" onClick={() => {
+                          setGoogleConnected(false);
+                          handleConnectGoogle();
+                        }} className="text-accent-blue font-bold">
+                          Retry with Permission
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {googleConnected && (
+              <div className="pt-2 mt-auto border-t border-prism-50 flex justify-between items-center">
+                <p className="text-[9px] text-prism-300 italic">Connected to Google</p>
+                <button 
+                  onClick={() => setGoogleConnected(false)}
+                  className="text-[10px] text-red-500 font-bold hover:underline"
+                >
+                  Sign Out
+                </button>
+              </div>
+            )}
+          </div>
+        ) : !uploading && source === 'search' ? (
+          <div className="w-full h-full flex flex-col p-4 space-y-4">
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="Search Unsplash visuals..."
+                className="flex-1 bg-prism-50 border-none rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-accent-blue outline-none"
+              />
+              <Button size="sm" onClick={handleSearch} disabled={searchLoading}>
+                {searchLoading ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+              </Button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto min-h-[150px] no-scrollbar">
+              <div className="grid grid-cols-2 gap-2">
+                {searchResults.map((photo) => (
+                  <button
+                    key={photo.id}
+                    onClick={() => handleSelectSearchPhoto(photo)}
+                    className="aspect-square relative group rounded-xl overflow-hidden border border-prism-100 hover:border-accent-blue transition-all"
+                  >
+                    <img 
+                      src={photo.urls?.thumb || undefined} 
+                      alt={photo.alt_description} 
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform" 
+                    />
+                    <div className="absolute inset-x-0 bottom-0 p-1 opacity-0 group-hover:opacity-100 transition-all bg-black/40 backdrop-blur-sm">
+                      <p className="text-[8px] text-white truncate">by {photo.user.name}</p>
+                    </div>
+                  </button>
+                ))}
+                {!searchLoading && searchResults.length === 0 && searchQuery && (
+                  <div className="col-span-2 text-center py-4">
+                    <p className="text-xs text-prism-400">No visuals found for "{searchQuery}"</p>
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && !searchQuery && (
+                  <div className="col-span-2 text-center py-4">
+                    <p className="text-xs text-prism-400 italic">Try "abstract architecture" or "mountain peaks"</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : !uploading && source === 'url' ? (
+          <div className="w-full flex flex-col items-center justify-center p-8 gap-4">
+            <div className="p-4 bg-accent-blue/5 rounded-full text-accent-blue">
+               <Link size={32} />
+            </div>
+            <div className="w-full space-y-3">
+              <p className="text-sm font-bold text-center text-prism-900">Import from URL</p>
+              <input 
+                type="url" 
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                placeholder="https://example.com/image.jpg"
+                className="w-full bg-prism-50 border-none rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-accent-blue outline-none"
+              />
+              <Button 
+                variant="prism" 
+                className="w-full rounded-xl" 
+                onClick={handleUrlSubmit}
+                disabled={!imageUrl}
+              >
+                Capture from URL
+              </Button>
+            </div>
           </div>
         ) : null}
 

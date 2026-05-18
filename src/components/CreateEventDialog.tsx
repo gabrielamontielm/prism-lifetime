@@ -194,7 +194,7 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
                     <div className="grid grid-cols-4 gap-3">
                       {formData.additionalPhotos.map((photo, idx) => (
                         <div key={idx} className="relative group aspect-square rounded-xl overflow-hidden border border-prism-100 shadow-sm bg-white">
-                          <img src={photo} alt="" className="w-full h-full object-cover" />
+                          <img src={photo || undefined} alt="" className="w-full h-full object-cover" />
                           <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                             <button 
                               onClick={() => setFormData(p => ({ ...p, additionalPhotos: p.additionalPhotos.filter((_, i) => i !== idx) }))}
@@ -293,7 +293,7 @@ export function CreateEventDialog({ onClose, onSuccess, editEvent }: CreateEvent
                       <div key={p.uid} className="flex items-center justify-between p-3 bg-white border border-prism-100 rounded-xl shadow-sm">
                         <div className="flex items-center gap-3">
                           {p.photoURL ? (
-                            <img src={p.photoURL} alt={p.displayName || ''} className="w-8 h-8 rounded-full" />
+                            <img src={p.photoURL || undefined} alt={p.displayName || ''} className="w-8 h-8 rounded-full" />
                           ) : (
                             <div className="w-8 h-8 rounded-full bg-prism-100 flex items-center justify-center text-xs font-bold">
                               {p.email[0].toUpperCase()}

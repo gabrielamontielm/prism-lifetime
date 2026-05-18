@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Filter, X, LayoutGrid, List, Map as MapIcon, Play } from 'lucide-react';
+import { Search, Filter, X, LayoutGrid, List, Map as MapIcon, Play, Columns } from 'lucide-react';
 
 interface FilterBarProps {
   search: string;
@@ -7,8 +7,8 @@ interface FilterBarProps {
   selectedTag: string | null;
   setSelectedTag: (t: string | null) => void;
   allTags: string[];
-  viewMode: 'standard' | 'compact' | 'map' | 'story' | 'bento';
-  setViewMode: (m: 'standard' | 'compact' | 'map' | 'story' | 'bento') => void;
+  viewMode: 'standard' | 'compact' | 'map' | 'story' | 'bento' | 'horizontal';
+  setViewMode: (m: 'standard' | 'compact' | 'map' | 'story' | 'bento' | 'horizontal') => void;
 }
 
 export function FilterBar({ 
@@ -79,6 +79,17 @@ export function FilterBar({
           >
             <LayoutGrid size={16} />
             <span className="hidden sm:inline">Bento</span>
+          </button>
+          <button 
+            onClick={() => setViewMode('horizontal')}
+            className={`flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-xs font-bold transition-all
+              ${viewMode === 'horizontal' 
+                ? 'bg-white text-prism-900 shadow-md' 
+                : 'text-prism-400 hover:text-prism-600'}
+            `}
+          >
+            <Columns size={16} className="rotate-90" />
+            <span className="hidden sm:inline">Stream</span>
           </button>
         </div>
       </div>
