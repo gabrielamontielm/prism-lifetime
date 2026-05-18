@@ -172,7 +172,7 @@ async function startServer() {
       const callbackUri = `${appUrl}/auth/google/picker-callback`;
 
       const response = await client.request({
-        url: 'https://photospicker.googleapis.com/v1/pickerSessions',
+        url: 'https://photospicker.googleapis.com/v1/sessions',
         method: 'POST',
         data: {
           callbackUri,
@@ -207,7 +207,7 @@ async function startServer() {
       console.log(`[Picker] Creating session with callback: ${callbackUri}`);
 
       const response = await client.request({
-        url: 'https://photospicker.googleapis.com/v1/pickerSessions',
+        url: 'https://photospicker.googleapis.com/v1/sessions',
         method: 'POST',
         data: {
           callbackUri,
@@ -268,8 +268,11 @@ async function startServer() {
       client.setCredentials(req.session.googleTokens);
 
       const response = await client.request({
-        url: `https://photospicker.googleapis.com/v1/pickerSessions/${sessionId}/mediaItems`,
-        method: 'GET'
+        url: 'https://photospicker.googleapis.com/v1/mediaItems',
+        method: 'GET',
+        params: {
+          sessionId
+        }
       });
 
       res.json(response.data);
