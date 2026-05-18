@@ -405,12 +405,47 @@ async function startServer() {
   app.get('/api/photos/proxy', async (req, res) => {
     const { url } = req.query;
     if (!url || typeof url !== 'string') return res.status(400).send('URL is required');
-    if (!req.session.googleTokens) return res.status(401).send('Not authenticated');
 
     try {
+      const headers: Record<string, string> = {};
+
+      let isGoogleApiUrl = false;
+      try {
+        const parsedUrl = new URL(url);
+        isGoogleApiUrl =
+          parsedUrl.hostname === 'googleapis.com' ||
+          parsedUrl.hostname.endsWith('.googleapis.com') ||
+          parsedUrl.hostname === 'googleusercontent.com' ||
+          parsedUrl.hostname.endsWith('.googleusercontent.com');
+      } catch (e) {
+        // Invalid URL, let axios handle the error
+      }
+
+      if (isGoogleApiUrl) {
+        if (!req.session.googleTokens) {
+          return res.status(401).send('Not authenticated with Google');
+        }
+
+        const client = getGoogleClient(req);
+        client.setCredentials(req.session.googleTokens);
+
+        try {
+          const accessTokenResponse = await client.getAccessToken();
+          const accessToken = accessTokenResponse.token;
+          if (accessToken) {
+            headers['Authorization'] = `Bearer ${accessToken}`;
+          }
+        } catch (tokenError) {
+           console.error('Failed to get access token for proxy:', tokenError);
+           return res.status(401).send('Failed to authenticate with Google');
+        }
+      }
+
       const response = await axios.get(url, {
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
+        headers
       });
+
       const contentType = response.headers['content-type'] as string || 'image/jpeg';
       res.setHeader('Content-Type', contentType);
       res.send(response.data);
