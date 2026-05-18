@@ -39,6 +39,8 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const [currentObjectURL, setCurrentObjectURL] = useState<string | null>(null);
 
+  const activeSessionIdRef = useRef<string | null>(null);
+
   React.useEffect(() => {
     checkGoogleStatus();
   }, []);
@@ -60,8 +62,16 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       }
 
       if (event.data?.type === 'PICKER_SUCCESS' && event.data?.sessionId) {
-        console.log('Google Picker success. Session:', event.data.sessionId);
-        fetchPickerResults(event.data.sessionId);
+        if (activeSessionIdRef.current === event.data.sessionId) {
+          console.log('Google Picker success for this instance. Session:', event.data.sessionId);
+          activeSessionIdRef.current = null;
+          fetchPickerResults(event.data.sessionId, true);
+        }
+      }
+
+      if (event.data?.type === 'PICKER_ERROR') {
+        setError(event.data.error || 'The picker encountered an error.');
+        activeSessionIdRef.current = null;
       }
     };
     window.addEventListener('message', handleMessage);
@@ -103,18 +113,29 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       const data = await res.json();
 
       if (!res.ok) {
+        if (res.status === 403) {
+          throw new Error('Please sign in again and check the "See your Google Photos library" permission box.');
+        }
         throw new Error(data.error || 'Failed to fetch photos');
       }
 
-      setGooglePhotos(data.mediaItems || []);
+      const itemsData = data.mediaItems || data.media_items || [];
+      const items = itemsData.filter((item: any) => item && (item.id || item.baseUrl || item.base_url));
+      setGooglePhotos(items);
 
       // If library is empty, try fetching albums to give the user another way
-      if (!effectiveAlbumId && (!data.mediaItems || data.mediaItems.length === 0)) {
+      if (!effectiveAlbumId && items.length === 0) {
         fetchGoogleAlbums();
       }
     } catch (err: any) {
       console.error('Fetch photos failed:', err);
       setError(err.message || 'Could not load your Google photos.');
+      
+      // If we get a 403, it means the user denied the broad library scope.
+      // Automatically switch to the "Picker" tab where they don't need that scope.
+      if (err.message.includes('permission box')) {
+        setViewMode('picker');
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -125,7 +146,8 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
       const res = await fetch('/api/albums', { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        setGoogleAlbums(data.albums || []);
+        const albums = (data.albums || []).filter((a: any) => a && a.id);
+        setGoogleAlbums(albums);
       }
     } catch (err) {
       console.error('Fetch albums failed:', err);
@@ -134,36 +156,116 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
 
   const handleOpenPicker = async () => {
     setError(null);
+    setGoogleLoading(true);
     
-    // If we think we aren't connected, do the auth flow directly
+    // If we think we aren't connected, do the auth flow first
     if (!googleConnected) {
       handleConnectGoogle();
+      setGoogleLoading(false);
       return;
     }
 
-    const pickerWindow = window.open('/api/photos/picker/start', 'google_photos_picker', 'width=600,height=700');
-    if (!pickerWindow) {
-      setError('Popup was blocked. Please allow popups for this site.');
+    try {
+      const res = await fetch('/api/photos/picker/session', { credentials: 'include' });
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (res.status === 401) {
+          setGoogleConnected(false);
+          handleConnectGoogle();
+          return;
+        }
+        throw new Error(data.error || 'Failed to create picker session');
+      }
+
+      const pickerUri = data.pickerUri || data.picker_uri;
+      const sessionId = data.id || data.sessionId;
+      if (!pickerUri) throw new Error('No picker URI returned from Google');
+
+      activeSessionIdRef.current = sessionId;
+      const pickerWindow = window.open(pickerUri, 'google_photos_picker', 'width=600,height=700');
+      
+      if (!pickerWindow) {
+        setError('Popup was blocked. Please allow popups for this site.');
+      } else {
+        // Polling as a fallback to postMessage
+        let pollCount = 0;
+        const maxPolls = 5;
+        const pollTimer = setInterval(() => {
+          if (pickerWindow.closed) {
+            clearInterval(pollTimer);
+            // If the ref is still set, it means postMessage wasn't received or didn't trigger yet
+            if (activeSessionIdRef.current === sessionId) {
+              console.log('Picker window closed, starting poll for results...');
+              
+              const pollForResults = async () => {
+                if (activeSessionIdRef.current !== sessionId && pollCount > 0) return;
+                
+                pollCount++;
+                console.log(`Polling attempt ${pollCount}/${maxPolls} for session ${sessionId}`);
+                
+                const foundItems = await fetchPickerResults(sessionId, false);
+                
+                if (!foundItems && pollCount < maxPolls && activeSessionIdRef.current === sessionId) {
+                  console.log('No items found yet, retrying in 2 seconds...');
+                  setTimeout(pollForResults, 2000);
+                } else if (!foundItems && pollCount >= maxPolls) {
+                  activeSessionIdRef.current = null;
+                  setError('No photos were returned from your selection. Please try again.');
+                } else {
+                   activeSessionIdRef.current = null;
+                }
+              };
+
+              // First poll after a short delay
+              setTimeout(pollForResults, 1000);
+            }
+          }
+        }, 1000);
+      }
+    } catch (err: any) {
+      console.error('Failed to start picker session:', err);
+      setError(err.message || 'Failed to start Google Photos Picker.');
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
-  const fetchPickerResults = async (sessionId: string) => {
+  const fetchPickerResults = async (sessionId: string, wasExplicitSuccess: boolean) => {
+    console.log(`[Picker] fetchPickerResults called for ${sessionId}. Explicit success: ${wasExplicitSuccess}`);
     setGoogleLoading(true);
     setUploading(true);
     try {
       const res = await fetch(`/api/photos/picker/items?sessionId=${sessionId}`, { credentials: 'include' });
       const data = await res.json();
       
+      console.log(`[Picker] Backend returned status ${res.status}. Data keys:`, Object.keys(data));
+      
       if (!res.ok) throw new Error(data.error || 'Failed to fetch chosen photos');
       
-      if (data.mediaItems && data.mediaItems.length > 0) {
-        // Just take the first one for now if user picked multiple but we only need one
-        const item = data.mediaItems[0];
-        await handleSelectGooglePhoto(item);
+      const items = data.mediaItems || data.media_items || data.pickedMediaItems || data.picked_media_items;
+      if (items && items.length > 0) {
+        console.log(`[Picker] Found ${items.length} items in picker session`);
+        
+        for (const nestedItem of items) {
+          const mediaItem = nestedItem.mediaItem || nestedItem.media_item || {};
+          const item = {
+            ...mediaItem,
+            mediaFileUri: nestedItem.mediaFileUri || nestedItem.media_file_uri
+          };
+          await handleSelectGooglePhoto(item);
+        }
+        return true;
+      } else if (wasExplicitSuccess) {
+        console.warn('[Picker] No items found in picker session data after explicit success:', data);
+        setError('No photos were returned. Did you forget to click "Done"?');
+        return false;
       }
+      return false;
     } catch (err: any) {
-      console.error('Fetch picked items failed:', err);
+      console.error('[Picker] Fetch picked items failed:', err);
       setError(err.message || 'Failed to retrieve selected photos.');
+      return false;
     } finally {
       setGoogleLoading(false);
       setUploading(false);
@@ -231,23 +333,26 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
   };
 
   const handleSelectGooglePhoto = async (photo: any) => {
+    console.log('[Picker] Selecting photo:', photo.id || photo.filename || 'unknown');
     setUploading(true);
     setError(null);
     try {
       // Picker API provides mediaFileUri for downloading
-      const downloadUrl = photo.mediaFileUri || `${photo.baseUrl}=d`;
+      const downloadUrl = photo.mediaFileUri || photo.media_file_uri || `${photo.baseUrl || photo.base_url}=d`;
+      console.log('[Picker] Proxying from URL:', downloadUrl.substring(0, 50) + '...');
       const proxyUrl = `/api/photos/proxy?url=${encodeURIComponent(downloadUrl)}`;
       const res = await fetch(proxyUrl, { credentials: 'include' });
       
-      if (!res.ok) throw new Error('Failed to download photo from Google');
+      if (!res.ok) throw new Error(`Proxy failed with status ${res.status}`);
       
       const blob = await res.blob();
+      console.log(`[Picker] Downloaded blob: ${blob.size} bytes. Type: ${blob.type}`);
       const file = new File([blob], `${photo.id || 'google-photo'}.jpg`, { type: 'image/jpeg' });
       
       await performUpload(file);
     } catch (err: any) {
-      console.error('Google Photo selection failed:', err);
-      setError('Could not download photo. Please try again.');
+      console.error('[Picker] Google Photo selection failed:', err);
+      setError(`Could not download photo: ${err.message}`);
       setUploading(false);
     }
   };
@@ -607,14 +712,14 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
                         </button>
                       )}
 
-                      {googlePhotos.map((photo) => (
+                      {googlePhotos.filter(p => p && p.id).map((photo) => (
                         <button
                           key={photo.id}
                           onClick={() => handleSelectGooglePhoto(photo)}
                           className="aspect-square relative group rounded-lg overflow-hidden border border-prism-100 hover:border-accent-blue transition-all"
                         >
                           <img 
-                            src={`${photo.baseUrl}=w200-h200-c`} 
+                            src={`${photo.baseUrl || photo.base_url}=w200-h200-c`} 
                             alt="" 
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform" 
                             referrerPolicy="no-referrer"
@@ -625,22 +730,24 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
                         </button>
                       ))}
 
-                      {!selectedAlbumId && googleAlbums.map((album) => (
-                        <button
-                          key={album.id}
-                          onClick={() => {
-                            setSelectedAlbumId(album.id);
-                            fetchGooglePhotos(album.id);
-                          }}
-                          className="aspect-square relative group rounded-lg overflow-hidden border border-prism-100 hover:border-accent-blue transition-all bg-prism-50 flex flex-col"
-                        >
-                          {album.coverPhotoBaseUrl ? (
-                             <img 
-                               src={`${album.coverPhotoBaseUrl}=w200-h200-c`} 
-                               alt="" 
-                               className="w-full h-2/3 object-cover group-hover:scale-110 transition-transform" 
-                             />
-                          ) : (
+                      {!selectedAlbumId && googleAlbums.filter(a => a && a.id).map((album) => {
+                        const coverUrl = album.coverPhotoBaseUrl || album.cover_photo_base_url;
+                        return (
+                          <button
+                            key={album.id}
+                            onClick={() => {
+                              setSelectedAlbumId(album.id);
+                              fetchGooglePhotos(album.id);
+                            }}
+                            className="aspect-square relative group rounded-lg overflow-hidden border border-prism-100 hover:border-accent-blue transition-all bg-prism-50 flex flex-col"
+                          >
+                            {coverUrl ? (
+                               <img 
+                                 src={`${coverUrl}=w200-h200-c`} 
+                                 alt="" 
+                                 className="w-full h-2/3 object-cover group-hover:scale-110 transition-transform" 
+                               />
+                            ) : (
                             <div className="w-full h-2/3 bg-prism-100 flex items-center justify-center">
                               <Box size={24} className="text-prism-300" />
                             </div>
@@ -649,7 +756,8 @@ export function FilePicker({ onUploadComplete, onClear, path, label, previewUrl:
                             <span className="text-[8px] font-bold text-prism-700 truncate line-clamp-2 leading-tight">{album.title}</span>
                           </div>
                         </button>
-                      ))}
+                      );
+                    })}
                     </div>
                     
                     {googlePhotos.length === 0 && googleAlbums.length === 0 && (

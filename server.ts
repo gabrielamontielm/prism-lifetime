@@ -111,7 +111,38 @@ async function startServer() {
   });
 
   app.get(['/auth/google/callback', '/auth/google/callback/'], async (req, res) => {
-    const { code } = req.query;
+    const { code, sessionId, error } = req.query;
+
+    if (sessionId || error) {
+      console.log(`[Picker] Callback received. SessionId: ${sessionId}, Error: ${error}`);
+      return res.send(`
+        <html>
+          <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #f8fafc;">
+            <div style="text-align: center; padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
+              <h2 style="color: #0f172a; margin-bottom: 0.5rem;">${error ? 'Selection Error' : 'Selection Complete'}</h2>
+              <p style="color: #64748b;">${error ? 'There was an issue selecting your photos.' : 'Syncing your chosen memories...'}</p>
+              <script>
+                if (window.opener) {
+                  window.opener.postMessage({ 
+                    type: '${error ? 'PICKER_ERROR' : 'PICKER_SUCCESS'}', 
+                    sessionId: '${sessionId || ''}',
+                    error: '${error || ''}'
+                  }, '*');
+                  setTimeout(() => window.close(), 800);
+                } else {
+                  window.close();
+                }
+              </script>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    if (!code) {
+      return res.status(400).send('No code provided');
+    }
+
     try {
       const client = getGoogleClient(req);
       const { tokens } = await client.getToken(code as string);
@@ -168,6 +199,17 @@ async function startServer() {
       const client = getGoogleClient(req);
       client.setCredentials(req.session.googleTokens);
 
+      // Proactively refresh tokens if possible
+      try {
+        const { token } = await client.getAccessToken();
+        if (token && token !== req.session.googleTokens.access_token) {
+           req.session.googleTokens = { ...req.session.googleTokens, access_token: token };
+           await new Promise<void>((resolve) => req.session.save(() => resolve()));
+        }
+      } catch (tokenError) {
+        console.warn('Token refresh failed (non-fatal):', tokenError);
+      }
+
       const appUrl = getAppUrl(req);
       const callbackUri = `${appUrl}/auth/google/picker-callback`;
 
@@ -175,19 +217,23 @@ async function startServer() {
         url: 'https://photospicker.googleapis.com/v1/sessions',
         method: 'POST',
         data: {
-          callbackUri,
-          maxImages: 50
         }
       });
 
-      const pickerUri = (response.data as any).pickerUri;
+      const pickerUri = (response.data as any).pickerUri || (response.data as any).picker_uri;
       
       req.session.save(() => {
         res.redirect(pickerUri);
       });
     } catch (error: any) {
-      console.error('Picker Start Error:', error.response?.data || error.message);
-      res.status(500).send('Failed to start Google Photos Picker. Please try again.');
+      const errorData = error.response?.data;
+      console.error('Picker Start Error Details:', JSON.stringify(errorData || error.message, null, 2));
+      
+      if (error.response?.status === 403) {
+         return res.status(500).send('Failed to start Google Photos Picker: Permission denied. Make sure the Picker API is enabled in your Google Cloud Console.');
+      }
+      
+      res.status(500).send(`Failed to start Google Photos Picker. ${error.message}`);
     }
   });
 
@@ -200,19 +246,22 @@ async function startServer() {
     try {
       const client = getGoogleClient(req);
       client.setCredentials(req.session.googleTokens);
-
-      const appUrl = getAppUrl(req);
-      const callbackUri = `${appUrl}/auth/google/picker-callback`;
       
-      console.log(`[Picker] Creating session with callback: ${callbackUri}`);
+      // Proactively refresh tokens if possible
+      try {
+        const { token } = await client.getAccessToken();
+        if (token && token !== req.session.googleTokens.access_token) {
+           req.session.googleTokens = { ...req.session.googleTokens, access_token: token };
+           await new Promise<void>((resolve) => req.session.save(() => resolve()));
+        }
+      } catch (tokenError) {
+        console.warn('Token refresh failed in /picker/session:', tokenError);
+      }
 
       const response = await client.request({
         url: 'https://photospicker.googleapis.com/v1/sessions',
         method: 'POST',
-        data: {
-          callbackUri,
-          maxImages: 50
-        }
+        data: {}
       });
 
       console.log(`[Picker] Session created: ${(response.data as any).id}`);
@@ -222,39 +271,26 @@ async function startServer() {
         res.json(response.data);
       });
     } catch (error: any) {
-      console.error('Create Picker Session Error Details:', JSON.stringify(error.response?.data || error.message, null, 2));
+      const errorData = error.response?.data;
+      console.error('Create Picker Session Error Details:', JSON.stringify(errorData || error.message, null, 2));
+      
       if (error.response?.status === 401) {
         req.session.googleTokens = undefined;
         req.session.save(() => {
-          res.status(401).json({ error: 'Google session expired' });
+          res.status(401).json({ error: 'Google session expired. please reconnect.' });
         });
         return;
       }
-      res.status(500).json({ error: 'Failed to create picker session' });
-    }
-  });
+      
+      if (error.response?.status === 403) {
+        return res.status(403).json({ error: 'Permission denied. Ensure the Google Photos Picker API is enabled.' });
+      }
 
-  app.get('/auth/google/picker-callback', (req, res) => {
-    const { sessionId } = req.query;
-    res.send(`
-      <html>
-        <body style="font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; background: #f8fafc;">
-          <div style="text-align: center; padding: 2rem; background: white; border-radius: 1rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-            <h2 style="color: #0f172a; margin-bottom: 0.5rem;">Selection Complete</h2>
-            <p style="color: #64748b;">Syncing your chosen memories...</p>
-            <script>
-              if (window.opener) {
-                window.opener.postMessage({ 
-                  type: 'PICKER_SUCCESS', 
-                  sessionId: '${sessionId}' 
-                }, '*');
-                setTimeout(() => window.close(), 1000);
-              }
-            </script>
-          </div>
-        </body>
-      </html>
-    `);
+      res.status(500).json({ 
+        error: 'Failed to create picker session', 
+        details: errorData || error.message 
+      });
+    }
   });
 
   app.get('/api/photos/picker/items', async (req, res) => {
@@ -267,18 +303,29 @@ async function startServer() {
       const client = getGoogleClient(req);
       client.setCredentials(req.session.googleTokens);
 
+      console.log(`[Picker] Fetching results for session: ${sessionId}`);
+
       const response = await client.request({
-        url: 'https://photospicker.googleapis.com/v1/mediaItems',
-        method: 'GET',
-        params: {
-          sessionId
-        }
+        url: `https://photospicker.googleapis.com/v1/sessions/${sessionId}`,
+        method: 'GET'
       });
 
-      res.json(response.data);
+      const data = response.data as any;
+      console.log(`[Picker] GET /v1/sessions/${sessionId} returned status: ${response.status}`);
+      console.log(`[Picker] Response data keys: ${Object.keys(data).join(', ')}`);
+      
+      const items = data.mediaItems || data.media_items || data.pickedMediaItems || data.picked_media_items || [];
+      console.log(`[Picker] Found ${items.length} items in session. State: ${data.state || 'N/A'}`);
+      
+      if (items.length > 0) {
+        console.log(`[Picker] First item keys: ${Object.keys(items[0]).join(', ')}`);
+      }
+      
+      res.json(data);
     } catch (error: any) {
-      console.error('Fetch Picker Items Error:', error.response?.data || error.message);
-      res.status(500).json({ error: 'Failed to fetch picked items' });
+      const errorData = error.response?.data;
+      console.error('Fetch Picker Items Error:', JSON.stringify(errorData || error.message, null, 2));
+      res.status(500).json({ error: 'Failed to fetch picked items', details: errorData });
     }
   });
 
@@ -361,7 +408,11 @@ async function startServer() {
       }
 
       if (error.response?.status === 403) {
+        console.error('Permission Denied (403). Required scopes might be missing or user did not grant library access.');
         console.error('Permission Denied Details:', JSON.stringify(error.response?.data, null, 2));
+        return res.status(403).json({ 
+          error: 'Permission Denied. Please ensure you checked the "See your Google Photos library" box during sign-in.' 
+        });
       }
       if (error.response?.status === 401) {
         req.session.googleTokens = undefined;
@@ -409,20 +460,33 @@ async function startServer() {
     const { url } = req.query;
     if (!url || typeof url !== 'string') return res.status(400).send('URL is required');
 
+    // Security check: Only allow images from Google or Unsplash
+    let isAllowed = false;
+    let isGoogleApiUrl = false;
+    try {
+      const parsedUrl = new URL(url);
+      isAllowed = 
+        parsedUrl.hostname === 'images.unsplash.com' ||
+        parsedUrl.hostname === 'googleapis.com' ||
+        parsedUrl.hostname.endsWith('.googleapis.com') ||
+        parsedUrl.hostname === 'googleusercontent.com' ||
+        parsedUrl.hostname.endsWith('.googleusercontent.com');
+
+      isGoogleApiUrl =
+        parsedUrl.hostname === 'googleapis.com' ||
+        parsedUrl.hostname.endsWith('.googleapis.com') ||
+        parsedUrl.hostname === 'googleusercontent.com' ||
+        parsedUrl.hostname.endsWith('.googleusercontent.com');
+    } catch (e) {
+      return res.status(400).send('Invalid URL');
+    }
+
+    if (!isAllowed) {
+      return res.status(403).send('Proxying this domain is not allowed');
+    }
+
     try {
       const headers: Record<string, string> = {};
-
-      let isGoogleApiUrl = false;
-      try {
-        const parsedUrl = new URL(url);
-        isGoogleApiUrl =
-          parsedUrl.hostname === 'googleapis.com' ||
-          parsedUrl.hostname.endsWith('.googleapis.com') ||
-          parsedUrl.hostname === 'googleusercontent.com' ||
-          parsedUrl.hostname.endsWith('.googleusercontent.com');
-      } catch (e) {
-        // Invalid URL, let axios handle the error
-      }
 
       if (isGoogleApiUrl) {
         if (!req.session.googleTokens) {

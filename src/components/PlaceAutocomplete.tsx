@@ -66,7 +66,7 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
     const prediction = suggestion.placePrediction;
     if (!prediction) return;
 
-    setInputValue(prediction.text.toString());
+    setInputValue(prediction.text?.toString() || '');
     setShowPredictions(false);
     
     if (!placesLib) return;
@@ -81,7 +81,7 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
 
       if (place.location) {
         onPlaceSelect({
-          address: place.formattedAddress || prediction.text.toString(),
+          address: place.formattedAddress || prediction.text?.toString() || '',
           lat: place.location.lat(),
           lng: place.location.lng(),
           placeId: place.id || prediction.placeId
@@ -93,7 +93,7 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
       console.error('Error fetching place details:', error);
       // Fallback if detail fetch fails
       onPlaceSelect({
-        address: prediction.text.toString(),
+        address: prediction.text?.toString() || '',
         lat: 0,
         lng: 0,
         placeId: prediction.placeId
@@ -151,8 +151,8 @@ export function PlaceAutocomplete({ onPlaceSelect, defaultValue = '' }: PlaceAut
               >
                 <MapPin size={16} className="text-accent-blue mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="text-sm font-bold text-prism-800 line-clamp-1">{prediction.mainText.toString()}</p>
-                  <p className="text-xs text-prism-500 line-clamp-1">{prediction.secondaryText.toString()}</p>
+                  <p className="text-sm font-bold text-prism-800 line-clamp-1">{prediction.mainText?.toString() || ''}</p>
+                  <p className="text-xs text-prism-500 line-clamp-1">{prediction.secondaryText?.toString() || ''}</p>
                 </div>
               </button>
             );
